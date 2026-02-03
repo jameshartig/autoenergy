@@ -1,0 +1,161 @@
+:root {
+  --primary-color: #007bff;
+  --bg-color: #f4f4f9;
+  --text-color: #333;
+  --card-bg: #fff;
+  --border-color: #ddd;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
+
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.main-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.main-header h1 {
+  margin: 0;
+  color: var(--primary-color);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 10px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header button {
+  padding: 8px 16px;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.header button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.action-list {
+  list-style: none;
+  padding: 0;
+}
+
+.action-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: flex-start;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.action-time {
+  font-weight: bold;
+  color: #666;
+  min-width: 80px;
+  margin-right: 15px;
+}
+
+.action-details {
+  flex: 1;
+}
+
+.action-details h3 {
+  margin: 0 0 5px 0;
+  font-size: 1.1em;
+}
+
+.action-details p {
+  margin: 0 0 10px 0;
+  color: #555;
+}
+
+.tags {
+  display: flex;
+  gap: 10px;
+}
+
+.tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.mode-charge_any {
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+
+.mode-load {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.mode-standby {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.solar-any {
+  background: #fffde7;
+  color: #f57f17;
+}
+
+.dry-run {
+  background: #f3e5f5;
+  color: #4a148c;
+}
+
+.action-footer {
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #666;
+  border-top: 1px solid #eee;
+  padding-top: 5px;
+}
+
+.price-label {
+  font-weight: bold;
+}
+
+.no-actions {
+  text-align: center;
+  color: #777;
+  font-style: italic;
+  margin-top: 20px;
+}
+
+.error {
+  color: #d32f2f;
+  background: #ffebee;
+  padding: 10px;
+  border-radius: 4px;
+  text-align: center;
+}
