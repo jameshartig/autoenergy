@@ -133,7 +133,8 @@ func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price) 
 
 	docID := price.TSStart.UTC().Format(time.RFC3339)
 	_, err = f.client.Collection("utility_prices").Doc(docID).Set(ctx, map[string]interface{}{
-		"json": string(jsonBytes),
+		"json":      string(jsonBytes),
+		"timestamp": price.TSStart,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to upsert price: %w", err)
@@ -152,7 +153,8 @@ func (f *FirestoreProvider) InsertAction(ctx context.Context, action types.Actio
 	// Use RFC3339 as document ID for lexicographic ordering and efficient range queries
 	docID := action.Timestamp.UTC().Format(time.RFC3339)
 	_, err = f.client.Collection("actions").Doc(docID).Set(ctx, map[string]interface{}{
-		"json": string(jsonBytes),
+		"json":      string(jsonBytes),
+		"timestamp": action.Timestamp,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to insert action: %w", err)
@@ -329,6 +331,30 @@ func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context) (tim
 	ts, err := time.Parse(time.RFC3339, doc.Ref.ID)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid energy history doc id %s: %w", doc.Ref.ID, err)
+	}
+	return ts, nil
+}
+
+// GetLatestPriceHistoryTime retrieves the timestamp of the last stored price record.
+func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error) {
+	// firestore automatically creates indexes for top-level fields
+	iter := f.client.Collection("utility_prices").
+		OrderBy("timestamp", firestore.Desc).
+		Limit(1).
+		Documents(ctx)
+	defer iter.Stop()
+
+	doc, err := iter.Next()
+	if err == iterator.Done {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to get latest price doc: %w", err)
+	}
+
+	ts, err := time.Parse(time.RFC3339, doc.Ref.ID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid price doc id %s: %w", doc.Ref.ID, err)
 	}
 	return ts, nil
 }

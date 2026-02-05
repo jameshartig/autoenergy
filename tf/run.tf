@@ -51,7 +51,7 @@ resource "google_cloudbuild_trigger" "github" {
   repository_event_config {
     repository = "projects/${var.project_id}/locations/us-central1/connections/github-jameshartig/repositories/jameshartig-autoenergy"
     push {
-      branch = "^main$"
+      branch = "^(main|wip)$"
     }
   }
 
@@ -124,7 +124,7 @@ resource "google_cloud_run_v2_service" "autoenergy" {
   template {
     max_instance_request_concurrency = 1000
     service_account                  = google_service_account.autoenergy.email
-    timeout                          = "10s"
+    timeout                          = "60s"
 
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"

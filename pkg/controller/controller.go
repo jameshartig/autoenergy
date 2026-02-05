@@ -45,7 +45,7 @@ func (c *Controller) Decide(
 
 	now := time.Now()
 	// Build Energy Model
-	model := c.buildHourlyEnergyModel(ctx, history)
+	model := c.buildHourlyEnergyModel(ctx, history, settings.IgnoreHourUsageOverMultiple)
 
 	solarMode := types.SolarModeAny
 	if !settings.GridExportSolar {
@@ -66,32 +66,48 @@ func (c *Controller) Decide(
 		case types.BatteryModeChargeAny:
 			// If we want to charge, and we are already charging (negative BatteryKW),
 			// then don't change anything.
-			if currentStatus.BatteryKW < 0 && currentStatus.CanImportBattery {
+			// we might not be charging if Battery is already full
+			// also make sure we've elevated the min SOC to force charging
+			if (currentStatus.BatteryKW < 0 || currentStatus.BatterySOC >= 99) && currentStatus.ElevatedMinBatterySOC && (!settings.GridChargeBatteries || currentStatus.CanImportBattery) {
 				finalBatMode = types.BatteryModeNoChange
 			}
 		case types.BatteryModeChargeSolar:
 			// If we want to charge from solar, and we are already charging from
 			// only solar (negative BatteryKW), then don't change anything.
-			if currentStatus.BatteryKW < 0 && !currentStatus.CanImportBattery {
+			// we might not be charging if Battery is already full
+			// also make sure we've elevated the min SOC to force charging
+			if (currentStatus.BatteryKW < 0 || currentStatus.BatterySOC >= 99) && currentStatus.ElevatedMinBatterySOC && !currentStatus.CanImportBattery {
 				finalBatMode = types.BatteryModeNoChange
 			}
 		case types.BatteryModeStandby:
 			// If we want to standby:
-			// 1. If discharging (BatteryKW < 0), we must change to Stop discharging.
+			// 1. If charging (BatteryKW < 0), we must change to Stop charging.
 			// 2. If effectively charging from grid, we want to stop
 			// 3. If charging from solar, we can't stop that so assume standby
 			// 4. If Idle (BatteryKW == 0), return NoChange.
 
 			// battery is charging from the grid if the battery charge rate exceeds
 			// the solar surplus (solar generation minus home consumption)
+			// give a little bit of tolerance to account for energy losses/floats/etc
 			isChargingFromGrid := false
-			if currentStatus.BatteryKW < 0 && currentStatus.GridKW > 0 {
+			if currentStatus.BatteryKW < -0.1 && currentStatus.GridKW > 0 {
 				solarSurplus := currentStatus.SolarKW - currentStatus.HomeKW
-				// TODO: should we use a tolerance here?
-				if -currentStatus.BatteryKW > solarSurplus {
+				// remember BatteryKW is negative when charging
+				// give a little bit of tolerance to account for energy losses/floats/etc
+				if solarSurplus < 0 || solarSurplus+currentStatus.BatteryKW > 0.1 {
 					isChargingFromGrid = true
 				}
 			}
+
+			slog.DebugContext(
+				ctx,
+				"determined if we are charging from grid for standby calculation",
+				slog.Float64("batteryKW", currentStatus.BatteryKW),
+				slog.Float64("gridKW", currentStatus.GridKW),
+				slog.Float64("solarKW", currentStatus.SolarKW),
+				slog.Float64("homeKW", currentStatus.HomeKW),
+				slog.Bool("isChargingFromGrid", isChargingFromGrid),
+			)
 
 			if currentStatus.BatteryKW > 0 {
 				// discharging, keep standby
@@ -107,9 +123,18 @@ func (c *Controller) Decide(
 		case types.BatteryModeNoChange:
 			// nothing to do
 		case types.BatteryModeLoad:
-			// if we are already discharging, don't change anything
-			// TODO: what if we are charging from solar?
-			if currentStatus.BatteryKW > 0 {
+			slog.DebugContext(
+				ctx,
+				"determined if we are using the battery as much as possible",
+				slog.Float64("batterySOC", currentStatus.BatterySOC),
+				slog.Float64("minBatterySOC", settings.MinBatterySOC),
+				slog.Bool("elevatedMinBatterySOC", currentStatus.ElevatedMinBatterySOC),
+				slog.Bool("gridChargeBatteries", settings.GridChargeBatteries),
+				slog.Bool("canImportBattery", currentStatus.CanImportBattery),
+			)
+			// if the minimum SOC is not elevated then we're already using the battery
+			// as much as possible
+			if !currentStatus.ElevatedMinBatterySOC && (!settings.GridChargeBatteries || currentStatus.CanImportBattery) {
 				finalBatMode = types.BatteryModeNoChange
 			}
 		default:
@@ -345,6 +370,15 @@ func (c *Controller) Decide(
 						slog.Float64("cheapestFutureCost", cheapestChargeCost),
 					)
 					break
+				} else {
+					slog.DebugContext(
+						ctx,
+						"deficit predicted, charging later",
+						slog.Float64("deficit", deficitAmount),
+						slog.Float64("chargeCost", chargeNowCost),
+						slog.Float64("cheapestFutureCost", cheapestChargeCost),
+						slog.Int("chargeDurationHours", chargeDurationHours),
+					)
 				}
 			}
 		}
@@ -381,6 +415,14 @@ func (c *Controller) Decide(
 					slog.Float64("diff", value-chargeNowCost),
 				)
 				break
+			} else {
+				slog.DebugContext(
+					ctx,
+					"arbitrage opportunity too small",
+					slog.Float64("buyAt", chargeNowCost),
+					slog.Float64("sellAt", value),
+					slog.Float64("minDiff", settings.MinArbitrageDifferenceDollarsPerKWH),
+				)
 			}
 		}
 	}
@@ -436,35 +478,92 @@ type timeProfile struct {
 }
 
 // buildHourlyEnergyModel averages usage and solar by hour of day from history.
-func (c *Controller) buildHourlyEnergyModel(_ context.Context, history []types.EnergyStats) map[int]timeProfile {
-	totals := make(map[int]struct {
+// It filters out outliers if ignoreHourUsageOverMultiple is set and > 0.
+func (c *Controller) buildHourlyEnergyModel(_ context.Context, history []types.EnergyStats, ignoreHourUsageOverMultiple float64) map[int]timeProfile {
+	type dataPoint struct {
 		solar float64
 		load  float64
-		count int
-	})
+	}
+	hourlyData := make(map[int][]dataPoint)
 
+	// Regroup history by hour
 	for _, h := range history {
 		if h.TSHourStart.IsZero() {
 			continue
 		}
-
 		hour := h.TSHourStart.Hour()
-		t := totals[hour]
-		t.solar += h.SolarKWH
-		t.load += h.HomeKWH
-		t.count++
-		totals[hour] = t
+		hourlyData[hour] = append(hourlyData[hour], dataPoint{
+			solar: h.SolarKWH,
+			load:  h.HomeKWH,
+		})
 	}
 
 	result := make(map[int]timeProfile)
-	for h, t := range totals {
-		if t.count == 0 {
+	for h, points := range hourlyData {
+		if len(points) == 0 {
 			continue
 		}
+
+		validPoints := points
+		if len(points) >= 3 && ignoreHourUsageOverMultiple > 0 {
+			// Find outliers by calculating average of ALL OTHER points and if
+			// point > avg(others) * multiple, it's an outlier but only exclude if there
+			// is EXACTLY ONE such point.
+
+			var outliers []int // indices
+			for i, p := range points {
+				// Calculate average of others
+				var sumOtherLoad float64
+				for j, other := range points {
+					if i == j {
+						continue
+					}
+					sumOtherLoad += other.load
+				}
+
+				if len(points) > 1 {
+					avgOtherLoad := sumOtherLoad / float64(len(points)-1)
+					if p.load > avgOtherLoad*ignoreHourUsageOverMultiple {
+						outliers = append(outliers, i)
+					}
+				}
+			}
+
+			if len(outliers) == 1 {
+				// We found exactly one outlier, ignore it
+				slog.Debug("ignoring outlier data point",
+					slog.Int("hour", h),
+					slog.Float64("outlier_load", points[outliers[0]].load),
+					slog.Float64("solar", points[outliers[0]].solar),
+				)
+				// Rebuild valid points excluding this one
+				validPoints = make([]dataPoint, 0, len(points)-1)
+				for i, p := range points {
+					if i != outliers[0] {
+						validPoints = append(validPoints, p)
+					}
+				}
+			} else if len(outliers) > 1 {
+				slog.Debug("ignoring multiple outlier data points",
+					slog.Int("hour", h),
+					slog.Int("outliers", len(outliers)),
+					slog.Int("points", len(points)),
+				)
+			}
+		}
+
+		// Now calculate averages from valid points
+		var totalSolar, totalLoad float64
+		for _, p := range validPoints {
+			totalSolar += p.solar
+			totalLoad += p.load
+		}
+		count := float64(len(validPoints))
+
 		result[h] = timeProfile{
 			Hour:        h,
-			AvgSolar:    t.solar / float64(t.count),
-			AvgHomeLoad: t.load / float64(t.count),
+			AvgSolar:    totalSolar / count,
+			AvgHomeLoad: totalLoad / count,
 		}
 	}
 	return result

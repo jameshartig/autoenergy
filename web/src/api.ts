@@ -30,12 +30,37 @@ export const SolarMode = {
 
 export type SolarMode = typeof SolarMode[keyof typeof SolarMode];
 
-export const fetchActions = async (start: Date, end: Date): Promise<Action[]> => {
+export const fetchActions = async (start: Date, end: Date): Promise<Action[]|null> => {
     const startStr = start.toISOString();
     const endStr = end.toISOString();
     const response = await fetch(`/api/history/actions?start=${startStr}&end=${endStr}`);
     if (!response.ok) {
         throw new Error('Failed to fetch actions');
+    }
+    return response.json();
+};
+
+export interface SavingsStats {
+    timestamp: string;
+    cost: number;
+    credit: number;
+    batterySavings: number;
+    solarSavings: number;
+    avoidedCost: number;
+    chargingCost: number;
+    solarGenerated: number;
+    gridImported: number;
+    gridExported: number;
+    homeUsed: number;
+    batteryUsed: number;
+}
+
+export const fetchSavings = async (start: Date, end: Date): Promise<SavingsStats|null> => {
+    const startStr = start.toISOString();
+    const endStr = end.toISOString();
+    const response = await fetch(`/api/history/savings?start=${startStr}&end=${endStr}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch savings');
     }
     return response.json();
 };
@@ -47,6 +72,7 @@ export interface Settings {
     additionalFeesDollarsPerKWH: number;
     minArbitrageDifferenceDollarsPerKWH: number;
     minBatterySOC: number;
+    ignoreHourUsageOverMultiple: number;
     gridChargeBatteries: boolean;
     gridExportSolar: boolean;
 }

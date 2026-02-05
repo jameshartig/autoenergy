@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Battery Case (Scaled down by 16x) -->
+  <rect x="2" y="8" width="25" height="16" rx="2.5" ry="2.5"
+        style="fill:none;stroke:#16a34a;stroke-width:2;"/>
+  <!-- Terminal -->
+  <path d="M28 12.5 h 1.5 a 1.25 1.25 0 0 1 1.25 1.25 v 4.5 a 1.25 1.25 0 0 1 -1.25 1.25 h -1.5 z"
+        style="fill:#16a34a;"/>
+  <!-- Green Fill (Full) -->
+  <rect x="4" y="10" width="21" height="12" rx="1.25" ry="1.25"
+        style="fill:#22c55e;"/>
+</svg>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { fetchSettings, updateSettings, type Settings as SettingsType } from './api';
 import './Settings.css';
 
-const Settings = () => {
+const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -79,6 +79,20 @@ const Settings = () => {
                     <span className="help-text">Stop automatic updates (prices and history will still sync)</span>
                 </div>
 
+                <h3>Power History Settings</h3>
+                <div className="form-group">
+                    <label htmlFor="ignoreHourUsageOverMultiple">Ignore Usage Outlier Multiple</label>
+                    <input
+                        id="ignoreHourUsageOverMultiple"
+                        type="number"
+                        step="0.1"
+                        min="1"
+                        value={settings.ignoreHourUsageOverMultiple}
+                        onChange={(e) => handleChange('ignoreHourUsageOverMultiple', parseFloat(e.target.value))}
+                    />
+                    <span className="help-text">If a single hour's usage is this many times greater than the average of other data points for that hour, ignore it. Must be &ge; 1.</span>
+                </div>
+
                 <h3>Price Settings</h3>
                 <div className="form-group">
                     <label htmlFor="alwaysChargeUnder">Always Charge Under ($/kWh)</label>
@@ -89,6 +103,7 @@ const Settings = () => {
                         value={settings.alwaysChargeUnderDollarsPerKWH}
                         onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
                     />
+                    <span className="help-text">Always charge the battery if the price is below this threshold, regardless of forecast.</span>
                 </div>
                 <div className="form-group">
                     <label htmlFor="additionalFees">Additional Fees ($/kWh)</label>
@@ -99,6 +114,7 @@ const Settings = () => {
                         value={settings.additionalFeesDollarsPerKWH}
                         onChange={(e) => handleChange('additionalFeesDollarsPerKWH', parseFloat(e.target.value))}
                     />
+                    <span className="help-text">Fees added to the base price per kWh (e.g. delivery charges).</span>
                 </div>
                 <div className="form-group">
                     <label htmlFor="minArbitrage">Min Arbitrage Difference ($/kWh)</label>
@@ -109,6 +125,7 @@ const Settings = () => {
                         value={settings.minArbitrageDifferenceDollarsPerKWH}
                         onChange={(e) => handleChange('minArbitrageDifferenceDollarsPerKWH', parseFloat(e.target.value))}
                     />
+                    <span className="help-text">Minimum profit required to trigger charging for arbitrage.</span>
                 </div>
 
                 <h3>Battery Settings</h3>
@@ -123,6 +140,7 @@ const Settings = () => {
                         value={settings.minBatterySOC}
                         onChange={(e) => handleChange('minBatterySOC', parseFloat(e.target.value))}
                     />
+                    <span className="help-text">Minimum State of Charge to maintain.</span>
                 </div>
 
                 <h3>Grid Settings</h3>
@@ -135,6 +153,7 @@ const Settings = () => {
                         />
                         Grid Charge Batteries
                     </label>
+                    <span className="help-text">Allow charging batteries from the grid.</span>
                 </div>
                 <div className="form-group checkbox-group">
                     <label>
@@ -145,9 +164,12 @@ const Settings = () => {
                         />
                         Grid Export Solar
                     </label>
+                    <span className="help-text">Allow exporting solar generation to the grid.</span>
                 </div>
 
-                <button type="submit" className="save-button">Save Settings</button>
+                <button type="submit" className="save-button" disabled={!isAdmin}>
+                    {isAdmin ? 'Save Settings' : 'Read Only'}
+                </button>
             </form>
         </div>
     );

@@ -78,7 +78,10 @@ func (f *Franklin) Validate() error {
 		return fmt.Errorf("franklin credentials (token or username/password) are required")
 	}
 
-	return f.login(context.TODO())
+	// we use to require login to validate but that means for every start up we
+	// need to login even if we don't end up using franklin at all
+	//return f.login(context.TODO())
+	return nil
 }
 
 type loginResult struct {
@@ -111,7 +114,7 @@ func (f *Franklin) login(ctx context.Context) error {
 	data.Set("password", pwdHash)
 	data.Set("type", "0")
 
-	req, err := f.newPOSTFormRequest(ctx, "hes-gateway/terminal/initialize/appUserOrInstallerLogin", data)
+	req, err := f.newPostFormRequest(ctx, "hes-gateway/terminal/initialize/appUserOrInstallerLogin", data)
 	if err != nil {
 		return err
 	}
@@ -139,7 +142,7 @@ func (f *Franklin) login(ctx context.Context) error {
 	return nil
 }
 
-func (f *Franklin) newPOSTFormRequest(ctx context.Context, endpoint string, data url.Values) (*http.Request, error) {
+func (f *Franklin) newPostFormRequest(ctx context.Context, endpoint string, data url.Values) (*http.Request, error) {
 	u, err := url.Parse(f.baseURL)
 	if err != nil {
 		return nil, err
@@ -184,6 +187,28 @@ func (f *Franklin) newPostQueryRequest(ctx context.Context, endpoint string, par
 
 	u.RawQuery = params.Encode()
 	return http.NewRequestWithContext(ctx, "POST", u.String(), nil)
+}
+
+func (f *Franklin) newPostJSONRequest(ctx context.Context, endpoint string, data interface{}) (*http.Request, error) {
+	u, err := url.Parse(f.baseURL)
+	if err != nil {
+		return nil, err
+	}
+	u.Path, err = url.JoinPath(u.Path, endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
 }
 
 type franklinResponse struct {
@@ -339,18 +364,19 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 	}
 
 	return types.SystemStatus{
-		BatterySOC:         rd.RuntimeData.SOC,
-		EachBatterySOC:     rd.RuntimeData.EachSOC,
-		BatteryKW:          rd.RuntimeData.PowerBattery,
-		EachBatteryKW:      rd.RuntimeData.PowerEachBattery,
-		SolarKW:            rd.RuntimeData.PowerSolar,
-		GridKW:             rd.RuntimeData.PowerGrid,
-		HomeKW:             rd.RuntimeData.PowerLoad,
-		BatteryCapacityKWH: di.TotalBatteryCapacityKWH,
-		EmergencyMode:      modes.currentMode.WorkMode == 3,
-		CanExportSolar:     pc.GridFeedMaxFlag == GridFeedMaxFlagSolarOnly || pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
-		CanExportBattery:   pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
-		CanImportBattery:   pc.GridMaxFlag == GridMaxFlagChargeFromGrid,
+		BatterySOC:            rd.RuntimeData.SOC,
+		EachBatterySOC:        rd.RuntimeData.EachSOC,
+		BatteryKW:             rd.RuntimeData.PowerBattery,
+		EachBatteryKW:         rd.RuntimeData.PowerEachBattery,
+		SolarKW:               rd.RuntimeData.PowerSolar,
+		GridKW:                rd.RuntimeData.PowerGrid,
+		HomeKW:                rd.RuntimeData.PowerLoad,
+		BatteryCapacityKWH:    di.TotalBatteryCapacityKWH,
+		EmergencyMode:         modes.currentMode.WorkMode == 3,
+		CanExportSolar:        pc.GridFeedMaxFlag == GridFeedMaxFlagSolarOnly || pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
+		CanExportBattery:      pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
+		CanImportBattery:      pc.GridMaxFlag == GridMaxFlagChargeFromGrid,
+		ElevatedMinBatterySOC: modes.currentMode.ReserveSOC > 0 && modes.currentMode.ReserveSOC > f.settings.MinBatterySOC,
 
 		// TODO: get this from hes-gateway/common/getPowerCapConfigList
 		MaxBatteryChargeKW:    8 * float64(len(rd.RuntimeData.EachSOC)),
@@ -371,6 +397,15 @@ func (f *Franklin) getPowerControl(ctx context.Context) (getPowerControlSettingR
 	if err := f.doRequest(req, &res); err != nil {
 		return getPowerControlSettingResult{}, err
 	}
+
+	slog.DebugContext(
+		ctx,
+		"franklin power control",
+		slog.Int("gridMaxFlag", int(res.GridMaxFlag)),
+		slog.Int("gridFeedMaxFlag", int(res.GridFeedMaxFlag)),
+		slog.Float64("gridMax", res.GridMax),
+		slog.Float64("gridFeedMax", res.GridFeedMax),
+	)
 
 	return res, nil
 }
@@ -427,19 +462,20 @@ func (f *Franklin) SetPowerControl(ctx context.Context, cfg types.PowerControlCo
 }
 
 func (f *Franklin) setPowerControl(ctx context.Context, pc getPowerControlSettingResult) error {
-	data := url.Values{}
-	data.Set("gatewayId", f.gatewayID)
-	// TODO: what is -1 here?
-	data.Set("gridMax", fmt.Sprint(pc.GridMax))
-	data.Set("gridMaxFlag", fmt.Sprint(pc.GridMaxFlag))
+	data := map[string]interface{}{
+		"gatewayId": f.gatewayID,
+		// TODO: what is -1 here?
+		"gridMax":     pc.GridMax,
+		"gridMaxFlag": pc.GridMaxFlag,
+	}
 	// if we have no export, we don't set the gridFeedMax
 	if pc.GridFeedMaxFlag != 3 {
 		if pc.GridFeedMax < 0 {
 			pc.GridFeedMax = -1.0
 		}
-		data.Set("gridFeedMax", fmt.Sprint(pc.GridFeedMax))
+		data["gridFeedMax"] = pc.GridFeedMax
 	}
-	data.Set("gridFeedMaxFlag", fmt.Sprint(pc.GridFeedMaxFlag))
+	data["gridFeedMaxFlag"] = pc.GridFeedMaxFlag
 
 	slog.DebugContext(
 		ctx,
@@ -450,7 +486,7 @@ func (f *Franklin) setPowerControl(ctx context.Context, pc getPowerControlSettin
 		slog.Int("gridFeedMaxFlag", int(pc.GridFeedMaxFlag)),
 	)
 
-	req, err := f.newPOSTFormRequest(ctx, "hes-gateway/terminal/tou/setPowerControlV2", data)
+	req, err := f.newPostJSONRequest(ctx, "hes-gateway/terminal/tou/setPowerControlV2", data)
 	if err != nil {
 		return err
 	}
@@ -568,6 +604,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		return errors.New("self consumption mode not available")
 	}
 	sc := modes.selfConsumption
+	alreadySC := sc.ID == modes.currentMode.ID
 
 	data := url.Values{}
 	data.Set("gatewayId", f.gatewayID)
@@ -582,15 +619,16 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		minBatterySOC = 5
 	}
 
-	// TODO: If we set the SOC this way does it actually update?
 	soc := sc.ReserveSOC
+
+	slog.DebugContext(ctx, "existing reserve SOC", slog.Float64("reserveSOC", sc.ReserveSOC))
 
 	pc, err := f.getPowerControl(ctx)
 	if err != nil {
 		return err
 	}
 	var updatedPC bool
-	var updatedMode bool
+	var updatedModeOrSOC bool
 	switch bat {
 	case types.BatteryModeChargeAny:
 		// if they want to charge the battery then set the SOC to 100 to force it to
@@ -602,7 +640,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 			return errors.New("cannot edit reserve SOC")
 		}
 		soc = 100
-		updatedMode = true
+		updatedModeOrSOC = true
 		if f.settings.GridChargeBatteries {
 			if pc.GridMaxFlag != GridMaxFlagChargeFromGrid {
 				pc.GridMaxFlag = GridMaxFlagChargeFromGrid
@@ -624,7 +662,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 			return errors.New("cannot edit reserve SOC")
 		}
 		soc = 100
-		updatedMode = true
+		updatedModeOrSOC = true
 		if pc.GridMaxFlag != GridMaxFlagNoChargeFromGrid {
 			pc.GridMaxFlag = GridMaxFlagNoChargeFromGrid
 			updatedPC = true
@@ -635,7 +673,18 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		// solar is unavailable then it'll charge from the grid
 		// it seems like this accepts an int value
 		soc = minBatterySOC
-		updatedMode = true
+		updatedModeOrSOC = true
+		if f.settings.GridChargeBatteries {
+			if pc.GridMaxFlag != GridMaxFlagChargeFromGrid {
+				pc.GridMaxFlag = GridMaxFlagChargeFromGrid
+				updatedPC = true
+			}
+		} else {
+			if pc.GridMaxFlag != GridMaxFlagNoChargeFromGrid {
+				pc.GridMaxFlag = GridMaxFlagNoChargeFromGrid
+				updatedPC = true
+			}
+		}
 	case types.BatteryModeStandby:
 		rd, err := f.getRuntimeData(ctx)
 		if err != nil {
@@ -649,7 +698,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 			return errors.New("cannot edit reserve SOC")
 		}
 		soc = math.Max(math.Floor(rd.RuntimeData.SOC), minBatterySOC)
-		updatedMode = true
+		updatedModeOrSOC = true
 		if pc.GridMaxFlag != GridMaxFlagNoChargeFromGrid {
 			pc.GridMaxFlag = GridMaxFlagNoChargeFromGrid
 			updatedPC = true
@@ -660,7 +709,9 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		return fmt.Errorf("unknown battery mode: %v", bat)
 	}
 
-	data.Set("soc", strconv.Itoa(int(soc)))
+	// round to the nearest integer to minimize the chance of the battery charging
+	// or discharging when we don't want it to
+	data.Set("soc", strconv.Itoa(int(math.Round(soc))))
 
 	switch sol {
 	case types.SolarModeAny:
@@ -689,6 +740,64 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		return fmt.Errorf("unknown solar mode: %v", sol)
 	}
 
+	if updatedModeOrSOC {
+		if f.settings.DryRun {
+			if alreadySC {
+				slog.DebugContext(
+					ctx,
+					"dry run: would've updated just soc",
+					slog.String("soc", data.Get("soc")),
+					slog.String("workMode", data.Get("workMode")),
+				)
+			} else {
+				slog.DebugContext(
+					ctx,
+					"dry run: would've tou mode",
+					slog.String("soc", data.Get("soc")),
+					slog.String("workMode", data.Get("workMode")),
+				)
+			}
+		} else {
+			if alreadySC {
+				slog.DebugContext(
+					ctx,
+					"updating soc",
+					slog.String("soc", data.Get("soc")),
+					slog.String("workMode", data.Get("workMode")),
+				)
+				params := url.Values{}
+				params.Set("gatewayId", f.gatewayID)
+				params.Set("workMode", strconv.Itoa(sc.WorkMode))
+				params.Set("electricityType", strconv.Itoa(sc.ElectricityType))
+				params.Set("soc", data.Get("soc"))
+
+				req, err := f.newPostQueryRequest(ctx, "hes-gateway/terminal/tou/updateSocV2", params)
+				if err != nil {
+					return err
+				}
+				if err := f.doRequest(req, &struct{}{}); err != nil {
+					slog.ErrorContext(ctx, "failed to update soc", slog.Any("error", err))
+					return err
+				}
+			} else {
+				slog.DebugContext(
+					ctx,
+					"updating tou mode",
+					slog.String("soc", data.Get("soc")),
+					slog.String("workMode", data.Get("workMode")),
+				)
+				req, err := f.newPostQueryRequest(ctx, "hes-gateway/terminal/tou/updateTouModeV2", data)
+				if err != nil {
+					return err
+				}
+				if err := f.doRequest(req, &struct{}{}); err != nil {
+					slog.ErrorContext(ctx, "failed to update tou mode", slog.Any("error", err))
+					return err
+				}
+			}
+		}
+	}
+
 	if updatedPC {
 		if f.settings.DryRun {
 			slog.DebugContext(
@@ -702,30 +811,9 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		} else {
 			err := f.setPowerControl(ctx, pc)
 			if err != nil {
-				slog.ErrorContext(ctx, "failed to set power control", "error", err)
+				slog.ErrorContext(ctx, "failed to set power control", slog.Any("error", err))
 				return err
 			}
-		}
-	}
-
-	if updatedMode {
-		if f.settings.DryRun {
-			slog.DebugContext(
-				ctx,
-				"dry run: would've tou mode",
-				slog.String("soc", data.Get("soc")),
-				slog.String("workMode", data.Get("workMode")),
-				slog.String("electricityType", data.Get("electricityType")),
-				slog.String("oldIndex", data.Get("oldIndex")),
-				slog.String("stromEn", data.Get("stromEn")),
-			)
-		} else {
-			req, err := f.newPostQueryRequest(ctx, "hes-gateway/terminal/tou/updateTouModeV2", data)
-			if err != nil {
-				return err
-			}
-
-			return f.doRequest(req, &struct{}{})
 		}
 	}
 
@@ -884,6 +972,11 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 		s.GridExportKWH += (solarToGrid + batToGrid)
 		s.GridImportKWH += (gridToHome + gridToBat)
 		s.HomeKWH += (solarToHome + gridToHome + batToHome)
+		s.BatteryToHomeKWH += batToHome
+		s.BatteryToGridKWH += batToGrid
+		s.SolarToHomeKWH += solarToHome
+		s.SolarToBatteryKWH += solarToBat
+		s.SolarToGridKWH += solarToGrid
 	}
 
 	// Sort the keys in chronological order

@@ -27,6 +27,9 @@ func (m *mockUtility) LastConfirmedPrice(ctx context.Context) (types.Price, erro
 func (m *mockUtility) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
 	return nil, nil
 }
+func (m *mockUtility) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+	return nil, nil
+}
 func (m *mockUtility) Validate() error { return nil }
 
 type mockESS struct{}
@@ -74,6 +77,9 @@ func (m *mockStorage) UpsertEnergyHistory(ctx context.Context, stats types.Energ
 	return nil
 }
 func (m *mockStorage) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (m *mockStorage) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error) {
 	return time.Time{}, nil
 }
 func (m *mockStorage) Close() error { return nil }

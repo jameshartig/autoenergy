@@ -104,6 +104,7 @@ func (s *Server) setupHandler() http.Handler {
 	mux.HandleFunc("POST /api/update", s.handleUpdate)
 	mux.HandleFunc("GET /api/history/prices", s.handleHistoryPrices)
 	mux.HandleFunc("GET /api/history/actions", s.handleHistoryActions)
+	mux.HandleFunc("GET /api/history/savings", s.handleHistorySavings)
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("POST /api/settings", s.handleUpdateSettings)
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)

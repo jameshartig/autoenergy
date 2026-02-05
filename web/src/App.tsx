@@ -82,17 +82,17 @@ function App() {
     <Router>
       <div className="app-container">
         <header className="main-header">
-            <h1>AutoEnergy Actions</h1>
+            <h1>AutoEnergy</h1>
             <nav>
                 <Link to="/">Home</Link>
-                {isAdmin && <>&nbsp;<Link to="/settings">Settings</Link></>}
+                &nbsp;<Link to="/settings">Settings</Link>
                 {loggedIn && <>&nbsp;<button onClick={handleLogout} className="logout-button">Logout</button></>}
             </nav>
         </header>
         <main>
           <Routes>
             <Route path="/" element={<ActionList />} />
-            {isAdmin && <Route path="/settings" element={<Settings />} />}
+            <Route path="/settings" element={<Settings isAdmin={isAdmin} />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

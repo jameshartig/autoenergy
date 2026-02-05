@@ -18,3 +18,8 @@ Code Style
 - Keep package boundaries: controller logic in pkg/controller, external IO in utility/ess/storage/server.
 - Prefer context.Context in public APIs and return (value, error).
 - Use testify assert/require in tests.
+- Log with slog and use slog.String, slog.Int, slog.Float64, slog.Bool, slog.Any, etc for key value pairs
+- Log field names with headless camelcase
+- Struct fields should have json Go tags with their name headless camelcase
+- Tests should live in a file with the same name as the file they test, with suffix _test
+- Tests should be named Test<FunctionName> and all related tests should live as subtests in that function with t.Run()

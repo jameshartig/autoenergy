@@ -95,28 +95,101 @@ type comedPriceEntry struct {
 // fetchPrices retrieves prices from the ComEd API with specific parameters.
 // It caches the result for 5 minutes.
 func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	now := time.Now().In(ctLocation)
+
+	c.mu.Lock()
 	// we only need to fetch if it's been a new 5 minute block
 	if !c.lastFetchTime.IsZero() && !now.Truncate(5*time.Minute).After(c.lastFetchTime) {
-		return c.cachedPrices, nil
+		prices := c.cachedPrices
+		c.mu.Unlock()
+		return prices, nil
 	}
+	c.mu.Unlock()
+
+	// Fetch enough history to get at least the last few hours complete.
+	// 6 hours back should be plenty to get full hours even with delays.
+	start := now.Add(-6 * time.Hour)
+	prices, err := c.fetchPricesRange(ctx, start, now)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.cachedPrices = prices
+	c.lastFetchTime = now
+	c.mu.Unlock()
+
+	return prices, nil
+}
+
+// GetConfirmedPrices returns confirmed prices for a specific time range.
+// This requests 5-minute feed data and averages it into hourly buckets.
+func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+	slog.DebugContext(
+		ctx,
+		"getting comed confirmed price history",
+		slog.Time("start", start),
+		slog.Time("end", end),
+	)
+	prices, err := c.fetchPricesRange(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().In(ctLocation)
+	confirmedPrices := make([]types.Price, 0, len(prices))
+	var earliest time.Time
+	var latest time.Time
+
+	// Iterate backwards to find the first complete hour.
+	for i := len(prices) - 1; i >= 0; i-- {
+		p := prices[i]
+		// ignore any prices that are in the future
+		if p.TSEnd.After(now) {
+			continue
+		}
+
+		// greater than 55 minutes ensures we have a complete hour
+		if p.TSEnd.Sub(p.TSStart) <= 55*time.Minute {
+			continue
+		}
+
+		confirmedPrices = append(confirmedPrices, p)
+
+		if earliest.IsZero() || p.TSStart.Before(earliest) {
+			earliest = p.TSStart
+		}
+		if p.TSEnd.After(latest) {
+			latest = p.TSEnd
+		}
+	}
+
+	slog.DebugContext(
+		ctx,
+		"got comed confirmed prices",
+		slog.Time("earliest", earliest),
+		slog.Time("latest", latest),
+		slog.Int("count", len(confirmedPrices)),
+	)
+
+	return confirmedPrices, nil
+}
+
+// fetchPricesRange retrieves prices from the ComEd API for a specific range.
+// useCache determines if we should look at/update the cache.
+func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+	start = start.In(ctLocation)
+	end = end.In(ctLocation)
 
 	u, err := url.Parse(c.apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid api url: %w", err)
 	}
 
-	// Fetch enough history to get at least the last few hours complete.
-	// 5 hours back should be plenty to get full hours even with delays.
-	start := now.Add(-300 * time.Minute)
-
 	params := url.Values{}
 	params.Set("type", "5minutefeed")
 	params.Set("datestart", start.Format("200601021504"))
-	params.Set("dateend", now.Format("200601021504"))
+	params.Set("dateend", end.Format("200601021504"))
 	params.Set("format", "json")
 	u.RawQuery = params.Encode()
 
@@ -139,10 +212,17 @@ func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
 
 	var data []comedPriceEntry
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		slog.Error("failed to decode comed response", "error", err)
+		// Sometimes ComEd returns empty body or non-json on error or no data
+		slog.ErrorContext(ctx, "failed to decode comed response", slog.Any("error", err))
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-	slog.Debug("fetched prices", slog.Int("count", len(data)), slog.String("start", start.Format(time.RFC3339)), slog.String("end", now.Format(time.RFC3339)))
+	slog.DebugContext(
+		ctx,
+		"fetched prices",
+		slog.Int("count", len(data)),
+		slog.String("start", start.Format(time.RFC3339)),
+		slog.String("end", end.Format(time.RFC3339)),
+	)
 
 	// Map to group prices by hour
 	type hourlyData struct {
@@ -151,30 +231,30 @@ func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
 		count    int
 		lastTime time.Time
 	}
-	hours := make(map[time.Time]*hourlyData)
+	hours := make(map[int64]*hourlyData) // Key by unix hour to handle map keys
 
 	for _, item := range data {
 		ms, err := strconv.ParseInt(item.MillisUTC, 10, 64)
 		if err != nil {
-			slog.Warn("failed to parse comed millisUTC", slog.String("value", item.MillisUTC), slog.Any("error", err))
+			slog.WarnContext(ctx, "failed to parse comed millisUTC", slog.String("value", item.MillisUTC), slog.Any("error", err))
 			continue
 		}
 		centsPerKWH, err := strconv.ParseFloat(item.Price, 64)
 		if err != nil {
-			slog.Warn("failed to parse comed price", slog.String("value", item.Price), slog.Any("error", err))
+			slog.WarnContext(ctx, "failed to parse comed price", slog.String("value", item.Price), slog.Any("error", err))
 			continue
 		}
 
 		tsEnd := time.UnixMilli(ms).In(ctLocation)
 		// Truncate to hour start but we subtract 5 minutes because if the price is for
 		// 11:55-12:00, it should be included in the 11:00 hour.
-		// TODO: how do we handle DST?
 		hourStart := tsEnd.Add(-5 * time.Minute).Truncate(time.Hour)
+		key := hourStart.Unix()
 
-		if _, exists := hours[hourStart]; !exists {
-			hours[hourStart] = &hourlyData{start: hourStart}
+		if _, exists := hours[key]; !exists {
+			hours[key] = &hourlyData{start: hourStart}
 		}
-		h := hours[hourStart]
+		h := hours[key]
 		h.sum += centsPerKWH
 		h.count++
 		if tsEnd.After(h.lastTime) {
@@ -197,9 +277,6 @@ func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
 		return prices[i].TSStart.Before(prices[j].TSStart)
 	})
 
-	c.cachedPrices = prices
-	c.lastFetchTime = time.Now()
-
 	return prices, nil
 }
 
@@ -219,41 +296,21 @@ func (c *ComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 
 	// Return the latest available price (even if incomplete)
 	latest := prices[len(prices)-1]
-	slog.Debug("got current price", "price", latest.DollarsPerKWH, "ts", latest.TSStart)
+	slog.DebugContext(
+		ctx,
+		"got current price",
+		slog.Float64("price", latest.DollarsPerKWH),
+		slog.Time("ts", latest.TSStart),
+	)
 	return latest, nil
-}
-
-// LastConfirmedPrice returns the latest averaged price of a complete hour.
-// Returns an empty price struct if no complete hour is found.
-func (c *ComEd) LastConfirmedPrice(ctx context.Context) (types.Price, error) {
-	prices, err := c.fetchPrices(ctx)
-	if err != nil {
-		return types.Price{}, err
-	}
-
-	now := time.Now().In(ctLocation)
-
-	// Iterate backwards to find the first complete hour.
-	for i := len(prices) - 1; i >= 0; i-- {
-		p := prices[i]
-		// greater than 55 minutes ensures we have a complete hour
-		if !p.TSEnd.After(now) && p.TSEnd.Sub(p.TSStart) > 55*time.Minute {
-			slog.Debug("found last confirmed price", "price", p.DollarsPerKWH, "ts", p.TSStart)
-			return p, nil
-		}
-	}
-
-	slog.Debug("no confirmed price found in recent history")
-	return types.Price{}, nil
 }
 
 // GetFuturePrices returns predicted or day-ahead prices.
 // Prefers PJM API if configured, otherwise returns nothing
 func (c *ComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
-	slog.Debug("getting future prices")
 	if c.pjmAPIKey != "" {
-		slog.Debug("fetching pjm day ahead prices")
-		return c.fetchPJMDayAhead(ctx)
+		slog.Debug("fetching pjm day ahead prices for comed")
+		return c.fetchPJMDayAhead(ctx, pjmComedPNodeID)
 	}
 	return nil, nil
 }
@@ -265,7 +322,7 @@ type pjmItem struct {
 	TotalLMPDA           float64 `json:"total_lmp_da"`
 }
 
-func (c *ComEd) fetchPJMDayAhead(ctx context.Context) ([]types.Price, error) {
+func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.Price, error) {
 	now := time.Now().In(etLocation)
 	today := now.Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
@@ -276,7 +333,7 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context) ([]types.Price, error) {
 		return nil, fmt.Errorf("failed to parse pjm url (%s): %w", c.pjmAPIURL, err)
 	}
 	q := u.Query()
-	q.Set("pnode_id", pjmComedPNodeID)
+	q.Set("pnode_id", pnodeID)
 	q.Set("datetime_beginning_ept", dateRange)
 	q.Set("format", "json")
 	q.Set("fields", "datetime_beginning_ept,total_lmp_da")
@@ -293,7 +350,12 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context) ([]types.Price, error) {
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Accept", "application/json")
 
-	slog.Debug("fetching pjm prices", "url", u.String())
+	slog.DebugContext(
+		ctx,
+		"fetching pjm prices",
+		slog.String("url", u.String()),
+		slog.String("pnodeID", pnodeID),
+	)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -310,6 +372,8 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context) ([]types.Price, error) {
 	}
 
 	var prices []types.Price
+	var earliest time.Time
+	var latest time.Time
 	for _, item := range res {
 		// Parse EPT time
 		t, err := time.ParseInLocation("2006-01-02T15:04:05", item.DatetimeBeginningEPT, etLocation)
@@ -328,8 +392,21 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context) ([]types.Price, error) {
 			TSEnd:         t.Add(time.Hour),
 			DollarsPerKWH: price,
 		})
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+		if latest.IsZero() || t.After(latest) {
+			latest = t
+		}
 	}
 
-	slog.Debug("fetched pjm prices", "count", len(prices))
+	slog.DebugContext(
+		ctx,
+		"fetched pjm prices",
+		slog.Int("count", len(prices)),
+		slog.String("pnodeID", pnodeID),
+		slog.Time("earliest", earliest),
+		slog.Time("latest", latest),
+	)
 	return prices, nil
 }

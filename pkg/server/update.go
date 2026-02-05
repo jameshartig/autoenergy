@@ -104,21 +104,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	slog.DebugContext(ctx, "update: settings applied")
 
-	// 2. Sync the last confirmed price
-	{
-		lastPrice, err := s.utilityProvider.LastConfirmedPrice(ctx)
-		if err != nil {
-			slog.ErrorContext(ctx, "failed to get last confirmed price", slog.Any("error", err))
-		} else {
-			if err := s.storage.UpsertPrice(ctx, lastPrice); err != nil {
-				slog.ErrorContext(ctx, "failed to upsert price", slog.Any("error", err))
-			}
-		}
-	}
-
-	slog.DebugContext(ctx, "update: price synced")
-
-	// 3. Sync energy history
+	// 2. Sync energy history
 	{
 		// First, find out the last time we have history for
 		lastHistoryTime, err := s.storage.GetLatestEnergyHistoryTime(ctx)
@@ -127,28 +113,82 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Determine start time for fetching new data
-		// We want at most last 72 hours, but starting from the last record
-		// truncated to the hour in case we previously stored an incomplete hour
-		syncStart := time.Now().Add(-72 * time.Hour)
+		// We want at most last 5 days, but starting from the last record
+		// truncated to the hour in case we previously stored an incomplete hour.
+		// User requested to fetch from the beginning of the 5th previous day.
+		now := time.Now()
+		fiveDaysAgo := now.Add(-5 * 24 * time.Hour)
+		syncStart := time.Date(fiveDaysAgo.Year(), fiveDaysAgo.Month(), fiveDaysAgo.Day(), 0, 0, 0, 0, fiveDaysAgo.Location())
+
 		if !lastHistoryTime.IsZero() && lastHistoryTime.After(syncStart) {
 			syncStart = lastHistoryTime.Truncate(time.Hour)
 		}
 
 		slog.DebugContext(ctx, "syncing energy history", slog.Any("since", syncStart))
 
-		newHistory, err := s.essSystem.GetEnergyHistory(ctx, syncStart, time.Now())
-		if err != nil {
-			slog.ErrorContext(ctx, "failed to get energy history from ess", slog.Any("error", err))
-		} else {
-			for _, h := range newHistory {
-				if err := s.storage.UpsertEnergyHistory(ctx, h); err != nil {
-					slog.ErrorContext(ctx, "failed to upsert energy history", slog.Any("error", err))
+		// Loop day by day
+		for t := syncStart; t.Before(now); t = t.Add(24 * time.Hour) {
+			end := t.Add(24 * time.Hour)
+			if end.After(now) {
+				end = now
+			}
+
+			slog.DebugContext(ctx, "syncing energy history batch", "start", t, "end", end)
+			newHistory, err := s.essSystem.GetEnergyHistory(ctx, t, end)
+			if err != nil {
+				slog.ErrorContext(ctx, "failed to get energy history from ess", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
+				// continue to next day even if this one failed
+			} else {
+				for _, h := range newHistory {
+					if err := s.storage.UpsertEnergyHistory(ctx, h); err != nil {
+						slog.ErrorContext(ctx, "failed to upsert energy history", slog.Any("error", err))
+					}
 				}
 			}
 		}
 	}
 
-	slog.DebugContext(ctx, "update: history synced")
+	slog.DebugContext(ctx, "update: energy history synced")
+
+	// 2b. Sync price history
+	{
+		lastPriceTime, err := s.storage.GetLatestPriceHistoryTime(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to get latest price history time", slog.Any("error", err))
+		}
+
+		now := time.Now()
+		fiveDaysAgo := now.Add(-5 * 24 * time.Hour)
+		syncStart := time.Date(fiveDaysAgo.Year(), fiveDaysAgo.Month(), fiveDaysAgo.Day(), 0, 0, 0, 0, fiveDaysAgo.Location())
+
+		if !lastPriceTime.IsZero() && lastPriceTime.After(syncStart) {
+			syncStart = lastPriceTime.Truncate(time.Hour)
+		}
+
+		slog.DebugContext(ctx, "syncing price history", slog.Any("since", syncStart))
+
+		// Loop day by day
+		for t := syncStart; t.Before(now); t = t.Add(24 * time.Hour) {
+			end := t.Add(24 * time.Hour)
+			if end.After(now) {
+				end = now
+			}
+
+			slog.DebugContext(ctx, "syncing price history batch", "start", t, "end", end)
+			newPrices, err := s.utilityProvider.GetConfirmedPrices(ctx, t, end)
+			if err != nil {
+				slog.ErrorContext(ctx, "failed to get confirmed prices", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
+			} else {
+				for _, p := range newPrices {
+					if err := s.storage.UpsertPrice(ctx, p); err != nil {
+						slog.ErrorContext(ctx, "failed to upsert price", slog.Any("error", err))
+					}
+				}
+			}
+		}
+	}
+
+	slog.DebugContext(ctx, "update: price history synced")
 
 	if settings.Pause {
 		slog.InfoContext(ctx, "update: paused")
@@ -162,7 +202,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Fetch current ESS status
+	// 3. Fetch current ESS status
 	status, err := s.essSystem.GetStatus(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to get ess status", slog.Any("error", err))
@@ -185,7 +225,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Get Current Price for controller
+	// 4. Get Current Price for controller
 	currentPrice, err := s.utilityProvider.GetCurrentPrice(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to get price", slog.Any("error", err))
@@ -212,7 +252,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	slog.DebugContext(ctx, "update: starting decision")
 
-	// 6. Decide Action
+	// 7. Decide Action
 	decision, err := s.controller.Decide(ctx, status, currentPrice, futurePrices, energyHistory, settings)
 	if err != nil {
 		slog.ErrorContext(ctx, "controller decision failed", slog.Any("error", err))
@@ -234,7 +274,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		slog.String("explanation", decision.Explanation),
 	)
 
-	// 6. Execute Action
+	// 8. Execute Action
 	switch action.BatteryMode {
 	case types.BatteryModeChargeAny:
 		err = s.essSystem.SetModes(ctx, types.BatteryModeChargeAny, types.SolarModeAny) // Force charge
@@ -252,7 +292,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		action.DryRun = true
 	}
 
-	// 7. Log Action
+	// 9. Log Action
 	if err := s.storage.InsertAction(ctx, action); err != nil {
 		slog.ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 	}

@@ -90,12 +90,21 @@ func TestSettings(t *testing.T) {
 
 		srv.handleUpdateSettings(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+
+		// Invalid value (IgnoreHourUsageOverMultiple < 1)
+		body = `{"ignoreHourUsageOverMultiple": 0}`
+		req = httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+		req = withEmail(req, "admin@example.com")
+		w = httptest.NewRecorder()
+
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 	})
 
 	t.Run("Update Settings - Success", func(t *testing.T) {
 		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
-		body := `{"minBatterySOC": 80, "dryRun": true}`
+		body := `{"minBatterySOC": 80, "dryRun": true, "ignoreHourUsageOverMultiple": 5}`
 		req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
 		req = withEmail(req, "admin@example.com")
 		w := httptest.NewRecorder()

@@ -7,6 +7,10 @@ type Settings struct {
 	// Pause updates
 	Pause bool `json:"pause"`
 
+	// Power History Settings
+	// What multiple over previous days to ignore when calculating power usage
+	IgnoreHourUsageOverMultiple float64 `json:"ignoreHourUsageOverMultiple"`
+
 	// Price Settings
 	// Always charge when the price is under this amount (in $/kWh)
 	AlwaysChargeUnderDollarsPerKWH float64 `json:"alwaysChargeUnderDollarsPerKWH"`

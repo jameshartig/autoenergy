@@ -2,7 +2,6 @@ package utility
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -46,57 +45,6 @@ func TestComEd(t *testing.T) {
 		// So 2024-01-25 18:00:00 CT.
 		expectedTime := time.UnixMilli(1706227200000).In(ctLocation)
 		assert.Equal(t, expectedTime, price.TSStart)
-	})
-
-	t.Run("LastConfirmedPrice", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Return data spanning 2 hours.
-			// Hour 1: Complete (TSStart X, TSEnd Y <= Now)
-			// Hour 2: Incomplete (TSStart Y, TSEnd Z > Now)
-
-			now := time.Now().In(ctLocation)
-
-			var entries []comedPriceEntry
-
-			// Generate full hour for previous hour (12 entries: XX:05 to XX+1:00)
-			// This ensures coverage > 55 minutes (it will be 60 minutes)
-			prevHourStart := now.Add(-1 * time.Hour).Truncate(time.Hour)
-			for i := 1; i <= 12; i++ {
-				tMillis := prevHourStart.Add(time.Duration(i*5) * time.Minute).UnixMilli()
-				entries = append(entries, comedPriceEntry{
-					MillisUTC: fmt.Sprintf("%d", tMillis),
-					Price:     "2.0",
-				})
-			}
-
-			// Add one entry for current hour
-			currHourStart := now.Truncate(time.Hour)
-			tMillis := currHourStart.Add(5 * time.Minute).UnixMilli()
-			entries = append(entries, comedPriceEntry{
-				MillisUTC: fmt.Sprintf("%d", tMillis),
-				Price:     "4.0",
-			})
-
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(entries)
-		}))
-		defer ts.Close()
-
-		c := &ComEd{
-			apiURL: ts.URL,
-			client: ts.Client(),
-		}
-
-		price, err := c.LastConfirmedPrice(context.Background())
-		require.NoError(t, err)
-
-		if assert.NotEmpty(t, price) {
-			// Should match the first hour (2.0)
-			assert.Equal(t, 0.02, price.DollarsPerKWH)
-
-			// Ensure TSEnd is in the past
-			assert.True(t, price.TSEnd.Before(time.Now()) || price.TSEnd.Equal(time.Now()))
-		}
 	})
 
 	t.Run("Caching", func(t *testing.T) {
@@ -197,5 +145,60 @@ func TestComEd(t *testing.T) {
 		// Basic sanity checks
 		assert.NotZero(t, price.DollarsPerKWH)
 		assert.False(t, price.TSStart.IsZero())
+	})
+
+	t.Run("GetConfirmedPrices", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			now := time.Now().UTC()
+
+			// 1. Valid Past Hour (2 hours ago)
+			// Hour Start: now - 2h. Data point at End of Hour (Start + 1h)
+			validStart := now.Add(-2 * time.Hour).Truncate(time.Hour)
+			validEnd := validStart.Add(time.Hour)
+
+			// 2. Partial Past Hour (3 hours ago)
+			partialStart := now.Add(-3 * time.Hour).Truncate(time.Hour)
+			partialEnd := partialStart.Add(10 * time.Minute)
+
+			// 3. Future Hour (1 hour ahead)
+			futureStart := now.Add(1 * time.Hour).Truncate(time.Hour)
+			futureEnd := futureStart.Add(time.Hour)
+
+			makeEntry := func(t time.Time, price string) string {
+				ms := t.UnixMilli()
+				return fmt.Sprintf(`{"millisUTC":"%d","price":"%s"}`, ms, price)
+			}
+
+			// Response
+			jsonStr := fmt.Sprintf(`[%s, %s, %s]`,
+				makeEntry(validEnd, "0.02"), // 2 cents
+				makeEntry(partialEnd, "0.03"),
+				makeEntry(futureEnd, "0.04"),
+			)
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(jsonStr))
+		}))
+		defer ts.Close()
+
+		c := &ComEd{
+			apiURL: ts.URL,
+			client: ts.Client(),
+		}
+
+		ctx := context.Background()
+		now := time.Now()
+		// Request broad range covering everything
+		prices, err := c.GetConfirmedPrices(ctx, now.Add(-24*time.Hour), now.Add(24*time.Hour))
+		require.NoError(t, err)
+
+		// Assertions:
+		// - Future (1h ahead) should be ignored.
+		// - Partial (3h ago) should be ignored.
+		// - Valid (2h ago) should be accepted.
+		assert.Len(t, prices, 1)
+		if len(prices) > 0 {
+			assert.InDelta(t, 0.0002, prices[0].DollarsPerKWH, 0.0001) // 0.02 cents = 0.0002 dollars
+		}
 	})
 }

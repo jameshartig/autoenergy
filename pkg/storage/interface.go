@@ -24,6 +24,7 @@ type Provider interface {
 	GetActionHistory(ctx context.Context, start, end time.Time) ([]types.Action, error)
 	GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error)
 	GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, error)
+	GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error)
 
 	// Lifecycle
 	Close() error

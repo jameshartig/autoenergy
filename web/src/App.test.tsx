@@ -4,11 +4,12 @@ import userEvent from '@testing-library/user-event';
 import ActionList from './ActionList';
 import App from './App';
 import { BrowserRouter } from 'react-router-dom';
-import { fetchActions, fetchAuthStatus, fetchSettings, updateSettings, login, logout } from './api';
+import { fetchActions, fetchSavings, fetchAuthStatus, fetchSettings, updateSettings, login, logout } from './api';
 
 // Mock the API
 vi.mock('./api', () => ({
     fetchActions: vi.fn(),
+    fetchSavings: vi.fn(),
     fetchAuthStatus: vi.fn(),
     fetchSettings: vi.fn(),
     updateSettings: vi.fn(),
@@ -54,7 +55,7 @@ describe('ActionList', () => {
     it('renders loading state initially', () => {
         (fetchActions as any).mockReturnValueOnce(new Promise(() => {}));
         renderWithRouter(<ActionList />);
-        expect(screen.getByText('Loading actions...')).toBeInTheDocument();
+        expect(screen.getByText('Loading day...')).toBeInTheDocument();
     });
 
     it('renders actions when loaded', async () => {
@@ -69,7 +70,7 @@ describe('ActionList', () => {
         renderWithRouter(<ActionList />);
 
         await waitFor(() => {
-            const standbyElements = screen.getAllByText('Standby');
+            const standbyElements = screen.getAllByText('Hold Battery');
             expect(standbyElements.length).toBeGreaterThan(0);
             expect(screen.getByText('This is a test')).toBeInTheDocument();
         });
@@ -83,7 +84,7 @@ describe('ActionList', () => {
         });
     });
 
-    it.skip('navigates to previous day', async () => {
+    it('navigates to previous day', async () => {
          const user = userEvent.setup();
          (fetchActions as any).mockResolvedValue([]);
          renderWithRouter(<ActionList />);
@@ -150,6 +151,69 @@ describe('ActionList', () => {
                 return element !== null && element.classList.contains('tag') && content === 'No Change';
             });
             expect(badges.length).toBe(0);
+        });
+    });
+
+    it('groups consecutive no change actions into summary', async () => {
+        const actions = [
+            {
+                description: 'No change 1',
+                timestamp: new Date('2023-01-01T10:00:00').toISOString(),
+                batteryMode: 0, // NoChange
+                solarMode: 0, // NoChange
+                currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' }
+            },
+            {
+                description: 'No change 2',
+                timestamp: new Date('2023-01-01T10:30:00').toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                currentPrice: { dollarsPerKWH: 0.20, tsStart: '', tsEnd: '' }
+            }
+        ];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<ActionList />);
+
+        await waitFor(() => {
+            // Should show "No Change" title/header
+            expect(screen.getByRole('heading', { name: /No Change/ })).toBeInTheDocument();
+            // Should show average price: (0.10 + 0.20) / 2 = 0.15
+            expect(screen.getByText(/Avg Price:/)).toBeInTheDocument();
+            expect(screen.getByText(/\$0.150\/kWh/)).toBeInTheDocument();
+            // Should show range: 0.10 - 0.20
+            expect(screen.getByText(/Range: \$0.100 - \$0.200/)).toBeInTheDocument();
+            // Should show count in title
+            expect(screen.getByText('(2x)')).toBeInTheDocument();
+        });
+    });
+
+    it('renders daily savings summary', async () => {
+        (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue({
+            batterySavings: 5.50,
+            solarSavings: 5.00,
+            cost: 2.00,
+            credit: 1.00,
+            avoidedCost: 6.00,
+            chargingCost: 0.50,
+            solarGenerated: 20,
+            gridImported: 10,
+            gridExported: 5,
+            homeUsed: 25,
+            batteryUsed: 10
+        });
+
+        renderWithRouter(<ActionList />);
+
+        await waitFor(() => {
+            expect(screen.getByText('Daily Overview')).toBeInTheDocument();
+            expect(screen.getByText('Net Savings')).toBeInTheDocument();
+            expect(screen.getByText('$10.50')).toBeInTheDocument();
+            expect(screen.getByText('Solar Savings')).toBeInTheDocument();
+            expect(screen.getByText('$5.00')).toBeInTheDocument();
+            expect(screen.getByText('Battery Savings')).toBeInTheDocument();
+            expect(screen.getByText('$5.50')).toBeInTheDocument();
         });
     });
 });
@@ -228,13 +292,29 @@ describe('App & Settings', () => {
         });
     });
 
-    it('hides settings link when not admin', async () => {
+    it('shows settings link when not admin', async () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: false });
 
         render(<App />);
 
         await waitFor(() => {
-            expect(screen.queryByText('Settings')).not.toBeInTheDocument();
+            expect(screen.getByText('Settings')).toBeInTheDocument();
+        });
+    });
+
+    it('settings page is read-only when not admin', async () => {
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: false });
+        render(<App />);
+
+        // Navigate
+        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+
+        // Check button
+        await waitFor(() => {
+            const btn = screen.getByText('Read Only');
+            expect(btn).toBeInTheDocument();
+            expect(btn).toBeDisabled();
         });
     });
 
@@ -255,11 +335,11 @@ describe('App & Settings', () => {
 
         // Wait for link to appear
         await waitFor(() => {
-            expect(screen.getByText('Settings')).toBeInTheDocument();
+            expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
         });
 
         // Click settings
-        fireEvent.click(screen.getByText('Settings'));
+        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
 
         // Check if settings component loaded and fetched data
         await waitFor(() => {

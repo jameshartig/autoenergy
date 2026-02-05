@@ -33,12 +33,20 @@ type Action struct {
 type EnergyStats struct {
 	TSHourStart time.Time `json:"tsHourStart"`
 
+	// Totals
 	BatteryChargedKWH float64 `json:"batteryChargedKWH"`
 	BatteryUsedKWH    float64 `json:"batteryUsedKWH"`
 	SolarKWH          float64 `json:"solarKWH"`
+	HomeKWH           float64 `json:"homeKWH"`
 	GridExportKWH     float64 `json:"gridExportKWH"`
 	GridImportKWH     float64 `json:"gridImportKWH"`
-	HomeKWH           float64 `json:"homeKWH"`
+
+	// Source to destination
+	BatteryToHomeKWH  float64 `json:"batteryToHomeKWH"`
+	SolarToHomeKWH    float64 `json:"solarToHomeKWH"`
+	SolarToBatteryKWH float64 `json:"solarToBatteryKWH"`
+	SolarToGridKWH    float64 `json:"solarToGridKWH"`
+	BatteryToGridKWH  float64 `json:"batteryToGridKWH"`
 }
 
 // SystemStatus represents the current system status.
@@ -57,6 +65,7 @@ type SystemStatus struct {
 	CanExportSolar        bool      `json:"canExportSolar"`        // True if solar exporting is enabled
 	CanExportBattery      bool      `json:"canExportBattery"`      // True if battery exporting is enabled
 	CanImportBattery      bool      `json:"canImportBattery"`      // True if battery importing is enabled
+	ElevatedMinBatterySOC bool      `json:"elevatedMinBatterySOC"` // True if the minimum SOC is elevated to force standby
 	EmergencyMode         bool      `json:"emergencyMode"`
 }
 

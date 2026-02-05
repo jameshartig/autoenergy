@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -19,8 +20,11 @@ func TestFirestoreProvider(t *testing.T) {
 	// Use a test project ID
 	projectID := "test-project-id"
 
+	// Use a random database for isolation
+	randDB := fmt.Sprintf("test-db-%d", time.Now().UnixNano())
 	f := &FirestoreProvider{
 		projectID: projectID,
+		database:  randDB,
 	}
 
 	ctx := context.Background()
@@ -47,7 +51,7 @@ func TestFirestoreProvider(t *testing.T) {
 	})
 
 	t.Run("Prices", func(t *testing.T) {
-		now := time.Now().Truncate(time.Millisecond) // Firestore timestamp precision
+		now := time.Now().Truncate(time.Second).UTC() // Firestore timestamp precision (RFC3339 is seconds)
 		p1 := types.Price{TSStart: now.Add(-1 * time.Hour), DollarsPerKWH: 0.10}
 		p2 := types.Price{TSStart: now, DollarsPerKWH: 0.12}
 
@@ -91,10 +95,21 @@ func TestFirestoreProvider(t *testing.T) {
 			}
 			assert.True(t, foundP2Updated, "did not find updated price p2")
 		})
+
+		t.Run("GetLatestPriceHistoryTime", func(t *testing.T) {
+			// Insert a future price
+			future := now.Add(24 * time.Hour)
+			pFuture := types.Price{TSStart: future, DollarsPerKWH: 0.99}
+			require.NoError(t, f.UpsertPrice(ctx, pFuture))
+
+			latestTime, err := f.GetLatestPriceHistoryTime(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, future, latestTime, "latest time should match the future timestamp we just inserted")
+		})
 	})
 
 	t.Run("Actions", func(t *testing.T) {
-		now := time.Now().Truncate(time.Millisecond)
+		now := time.Now().Truncate(time.Second).UTC()
 		a1 := types.Action{
 			Timestamp:    now,
 			BatteryMode:  types.BatteryModeChargeAny,
