@@ -149,8 +149,20 @@ func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([
 			continue
 		}
 
-		// greater than 55 minutes ensures we have a complete hour
-		if p.TSEnd.Sub(p.TSStart) <= 55*time.Minute {
+		// less than 59 minutes means we don't have a full hour
+		if p.TSEnd.Sub(p.TSStart) <= 59*time.Minute {
+			continue
+		}
+
+		// require full 12 5-minute periods to ensure complete data but somehow we
+		// don't have enough samples even though we have 59+minutes of data
+		if p.SampleCount != 12 {
+			slog.ErrorContext(
+				ctx,
+				"incomplete price data for hour",
+				slog.Time("tsStart", p.TSStart),
+				slog.Time("tsEnd", p.TSEnd),
+				slog.Int("sampleCount", p.SampleCount))
 			continue
 		}
 
@@ -246,9 +258,7 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 		}
 
 		tsEnd := time.UnixMilli(ms).In(ctLocation)
-		// Truncate to hour start but we subtract 5 minutes because if the price is for
-		// 11:55-12:00, it should be included in the 11:00 hour.
-		hourStart := tsEnd.Add(-5 * time.Minute).Truncate(time.Hour)
+		hourStart := tsEnd.Truncate(time.Hour)
 		key := hourStart.Unix()
 
 		if _, exists := hours[key]; !exists {
@@ -267,8 +277,9 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 		avgCents := h.sum / float64(h.count)
 		prices = append(prices, types.Price{
 			TSStart:       h.start,
-			TSEnd:         h.lastTime,
+			TSEnd:         h.lastTime.Add(4*time.Minute + 59*time.Second),
 			DollarsPerKWH: avgCents / 100, // Cents to Dollars
+			SampleCount:   h.count,
 		})
 	}
 

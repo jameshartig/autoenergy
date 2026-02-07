@@ -7,6 +7,7 @@ type Price struct {
 	TSStart       time.Time `json:"tsStart"`
 	TSEnd         time.Time `json:"tsEnd"`
 	DollarsPerKWH float64   `json:"dollarsPerKWH"`
+	SampleCount   int       `json:"-"`
 }
 
 // ActionType represents the type of action taken by the system.

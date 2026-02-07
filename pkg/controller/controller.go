@@ -273,7 +273,7 @@ func (c *Controller) Decide(
 	// track simulated energy
 	simEnergy := availableKWH
 	hitCapacity := simEnergy >= capacityKWH
-	hitDeficit := false
+	var hitDeficitAt time.Time
 	minEnergy := availableKWH
 	maxEnergy := availableKWH
 
@@ -330,7 +330,7 @@ func (c *Controller) Decide(
 
 		// check if we are below the minimum SOC and when we need to charge
 		if simEnergy < minKWH {
-			if !hitDeficit {
+			if hitDeficitAt.IsZero() {
 				slog.DebugContext(
 					ctx,
 					"simulated energy below minimum SOC",
@@ -339,7 +339,7 @@ func (c *Controller) Decide(
 					slog.Int("simHour", slot.hour),
 				)
 			}
-			hitDeficit = true
+			hitDeficitAt = slot.ts
 			deficitAmount := minKWH - simEnergy
 
 			// only consider charging if GridCharging is enabled
@@ -361,7 +361,7 @@ func (c *Controller) Decide(
 				// charge now than later, charge now
 				if chargeNowCost <= cheapestChargeCost {
 					shouldCharge = true
-					chargeReason = fmt.Sprintf("Projected Deficit of %.2fkWh at %s. ChargeNow (%.3f) <= BestAlt (%.3f).", deficitAmount, slot.ts.Format(time.Kitchen), chargeNowCost, cheapestChargeCost)
+					chargeReason = fmt.Sprintf("Projected Deficit at %s. Charge Now ($%.3f) <= Later ($%.3f).", slot.ts.Format(time.Kitchen), chargeNowCost, cheapestChargeCost)
 					slog.DebugContext(
 						ctx,
 						"deficit predicted, charging now",
@@ -438,12 +438,12 @@ func (c *Controller) Decide(
 	// If we have a deficit, but we are at the Highest Price, Use it (Load).
 	// If we have a deficit, and cheaper now than later, Standby (Save for later).
 
-	if hitDeficit {
+	if !hitDeficitAt.IsZero() {
 		// We are going to run out. Should we save it?
 		// Check if there is a significantly more expensive time later.
 		// If current price is lower than maxFuturePrice, we should probably save it.
 		if currentPrice.DollarsPerKWH < maxFuturePrice {
-			standbyReason := fmt.Sprintf("Deficit predicted and higher prices later (%.3f < %.3f).", currentPrice.DollarsPerKWH, maxFuturePrice)
+			standbyReason := fmt.Sprintf("Deficit predicted at %s and higher prices later ($%.3f < $%.3f).", hitDeficitAt.Format(time.Kitchen), currentPrice.DollarsPerKWH, maxFuturePrice)
 			slog.DebugContext(
 				ctx,
 				"deficit predicted, saving for peak",

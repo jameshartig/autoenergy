@@ -31,6 +31,13 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	settings, err := s.storage.GetSettings(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to get settings", "error", err)
+		http.Error(w, "failed to get settings", http.StatusInternalServerError)
+		return
+	}
+
 	// Fetch prices (these are hourly)
 	prices, err := s.storage.GetPriceHistory(ctx, start, end)
 	if err != nil {
@@ -56,18 +63,11 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	var totalSavings SavingsStats
 	totalSavings.Timestamp = start
 	hourlyPrices := make(map[time.Time]float64)
-	hourlyPriceCounts := make(map[time.Time]int)
 
+	// TODO: fix this so that we look at the actual time ranges
 	for _, p := range prices {
 		tsHour := p.TSStart.Truncate(time.Hour)
-		hourlyPrices[tsHour] += p.DollarsPerKWH
-		hourlyPriceCounts[tsHour]++
-	}
-
-	for ts, total := range hourlyPrices {
-		if count := hourlyPriceCounts[ts]; count > 0 {
-			hourlyPrices[ts] = total / float64(count)
-		}
+		hourlyPrices[tsHour] = p.DollarsPerKWH
 	}
 
 	for _, stat := range energyStats {
@@ -75,6 +75,8 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 
 		// this will be 0 if we don't have price data for this hour
 		price := hourlyPrices[ts]
+		gridImportPrice := price + settings.AdditionalFeesDollarsPerKWH
+		gridExportPrice := price
 
 		// Accumulate Energy Amounts even if price is missing
 		totalSavings.HomeUsed += stat.HomeKWH
@@ -84,27 +86,42 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 		totalSavings.BatteryUsed += stat.BatteryUsedKWH
 
 		// Cost and Credit
-		cost := stat.GridImportKWH * price
-		credit := stat.GridExportKWH * price
+		cost := stat.GridImportKWH * gridImportPrice
+		credit := stat.GridExportKWH * gridExportPrice
 		totalSavings.Cost += cost
 		totalSavings.Credit += credit
 
 		// Determine how much battery was used to power the home and what cost we
 		// avoided by using the battery instead of the grid.
 		batteryToHome := stat.BatteryToHomeKWH
-		avoided := batteryToHome * price
+		avoided := batteryToHome * gridImportPrice
 		totalSavings.AvoidedCost += avoided
 
 		// Determine how much battery was charged from the grid and what cost we
 		// paid to charge the battery.
 		gridToBattery := math.Max(0, stat.BatteryChargedKWH-stat.SolarToBatteryKWH)
-		chargingCost := gridToBattery * price
+		chargingCost := gridToBattery * gridImportPrice
 		totalSavings.ChargingCost += chargingCost
 
 		// Solar Savings: Solar powering the home.
+		// you might think to include solar to battery as solar savings but it gets
+		// counted as battery savings later when the battery is discharged.
 		solarToHome := stat.SolarToHomeKWH
-		solarSavings := solarToHome * price
+		solarSavings := solarToHome * gridImportPrice
 		totalSavings.SolarSavings += solarSavings
+
+		slog.DebugContext(
+			ctx,
+			"franklin hourly savings",
+			slog.Time("ts", ts),
+			slog.Float64("price", price),
+			slog.Float64("batteryToHome", batteryToHome),
+			slog.Float64("avoided", avoided),
+			slog.Float64("gridToBattery", gridToBattery),
+			slog.Float64("chargingCost", chargingCost),
+			slog.Float64("solarToHome", solarToHome),
+			slog.Float64("solarSavings", solarSavings),
+		)
 	}
 
 	totalSavings.BatterySavings = totalSavings.AvoidedCost - totalSavings.ChargingCost

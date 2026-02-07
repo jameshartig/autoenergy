@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,30 +152,38 @@ func TestComEd(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			now := time.Now().UTC()
 
-			// 1. Valid Past Hour (2 hours ago)
-			// Hour Start: now - 2h. Data point at End of Hour (Start + 1h)
-			validStart := now.Add(-2 * time.Hour).Truncate(time.Hour)
-			validEnd := validStart.Add(time.Hour)
-
-			// 2. Partial Past Hour (3 hours ago)
-			partialStart := now.Add(-3 * time.Hour).Truncate(time.Hour)
-			partialEnd := partialStart.Add(10 * time.Minute)
-
-			// 3. Future Hour (1 hour ahead)
-			futureStart := now.Add(1 * time.Hour).Truncate(time.Hour)
-			futureEnd := futureStart.Add(time.Hour)
-
 			makeEntry := func(t time.Time, price string) string {
 				ms := t.UnixMilli()
 				return fmt.Sprintf(`{"millisUTC":"%d","price":"%s"}`, ms, price)
 			}
 
-			// Response
-			jsonStr := fmt.Sprintf(`[%s, %s, %s]`,
-				makeEntry(validEnd, "0.02"), // 2 cents
-				makeEntry(partialEnd, "0.03"),
-				makeEntry(futureEnd, "0.04"),
-			)
+			var entries []string
+
+			// 1. Valid Past Hour (2 hours ago) - 12 entries
+			// 0, 5, 10, ..., 55 minutes past the hour = 12 entries
+			validStart := now.Add(-2 * time.Hour).Truncate(time.Hour)
+			for i := 0; i < 12; i++ {
+				t := validStart.Add(time.Duration(i*5) * time.Minute)
+				entries = append(entries, makeEntry(t, "2.0"))
+			}
+
+			// 2. Partial Past Hour (3 hours ago) - 11 entries
+			// Missing one entry
+			partialStart := now.Add(-3 * time.Hour).Truncate(time.Hour)
+			for i := 0; i < 11; i++ {
+				t := partialStart.Add(time.Duration(i*5) * time.Minute)
+				entries = append(entries, makeEntry(t, "3.0"))
+			}
+
+			// 3. Future Hour (1 hour ahead) - 12 entries
+			// Should be ignored even if full because it's in the future
+			futureStart := now.Add(1 * time.Hour).Truncate(time.Hour)
+			for i := 0; i < 12; i++ {
+				t := futureStart.Add(time.Duration(i*5) * time.Minute)
+				entries = append(entries, makeEntry(t, "4.0"))
+			}
+
+			jsonStr := fmt.Sprintf("[%s]", strings.Join(entries, ","))
 
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(jsonStr))
@@ -194,11 +203,13 @@ func TestComEd(t *testing.T) {
 
 		// Assertions:
 		// - Future (1h ahead) should be ignored.
-		// - Partial (3h ago) should be ignored.
+		// - Partial (3h ago) should be ignored because < 12 entries.
 		// - Valid (2h ago) should be accepted.
 		assert.Len(t, prices, 1)
 		if len(prices) > 0 {
-			assert.InDelta(t, 0.0002, prices[0].DollarsPerKWH, 0.0001) // 0.02 cents = 0.0002 dollars
+			assert.InDelta(t, 0.02, prices[0].DollarsPerKWH, 0.0001) // 2.0 cents = 0.02 dollars
+			// Ensure it's the valid hour
+			assert.Equal(t, now.Add(-2*time.Hour).Truncate(time.Hour).Unix(), prices[0].TSStart.Unix())
 		}
 	})
 }
