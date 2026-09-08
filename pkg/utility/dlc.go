@@ -29,6 +29,7 @@ func getDLCHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftDLCWeekendHoliday(christmasDay(year)),
+		shiftDLCWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

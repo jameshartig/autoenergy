@@ -29,6 +29,7 @@ func getFPLHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftFPLWeekendHoliday(christmasDay(year)),
+		shiftFPLWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

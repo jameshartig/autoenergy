@@ -25,6 +25,7 @@ func getAPSHolidays(year int) []string {
 		independenceDay(year),
 		veteransDay(year),
 		christmasDay(year),
+		newYearsDay(year + 1),
 	}
 
 	var holidays []time.Time
@@ -42,11 +43,6 @@ func getAPSHolidays(year int) []string {
 		christmasEve(year),
 		newYearsEve(year),
 	)
-
-	nextNY := newYearsDay(year + 1)
-	if nextNY.Weekday() == time.Saturday {
-		holidays = append(holidays, nextNY.AddDate(0, 0, -1))
-	}
 
 	return formatHolidays(holidays, year)
 }
@@ -282,7 +278,7 @@ func apsPeriods(plan string, options types.UtilityRateOptions, years []int) []ty
 							Description:   "APS Summer TOU On-Peak",
 						},
 						{
-							Name: "Off-Peak",
+							Name: "Overnight",
 							Hours: []types.UtilityHourPeriod{
 								{HourStart: 23, HourEnd: 24},
 								{HourStart: 0, HourEnd: 5},
@@ -335,7 +331,7 @@ func apsPeriods(plan string, options types.UtilityRateOptions, years []int) []ty
 							Description:   "APS Winter TOU Super Off-Peak",
 						},
 						{
-							Name: "Off-Peak",
+							Name: "Overnight",
 							Hours: []types.UtilityHourPeriod{
 								{HourStart: 23, HourEnd: 24},
 								{HourStart: 0, HourEnd: 5},

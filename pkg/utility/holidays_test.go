@@ -81,4 +81,30 @@ func TestHolidays(t *testing.T) {
 		assert.Equal(t, "2026-12-31", newYearsEve(2026).Format("2006-01-02"))
 		assert.Equal(t, "2027-12-31", newYearsEve(2027).Format("2006-01-02"))
 	})
+
+	t.Run("New Year's Day Saturday observance boundary", func(t *testing.T) {
+		// Jan 1, 2028 is Saturday.
+		// Utilities that shift weekend holidays observe New Year's Day on Friday Dec 31, 2027.
+		// 2027 holidays should include 2027-12-31.
+		// 2028 holidays should not include 2028-01-01.
+		h2027DLC := getDLCHolidays(2027)
+		assert.Contains(t, h2027DLC, "2027-12-31")
+		assert.NotContains(t, getDLCHolidays(2028), "2028-01-01")
+
+		h2027Duke := getDukeHolidays(2027)
+		assert.Contains(t, h2027Duke, "2027-12-31")
+		assert.NotContains(t, getDukeHolidays(2028), "2028-01-01")
+
+		h2027APS := getAPSHolidays(2027)
+		assert.Contains(t, h2027APS, "2027-12-31")
+		assert.NotContains(t, getAPSHolidays(2028), "2028-01-01")
+
+		h2027PECO := getPECOHolidays(2027)
+		assert.Contains(t, h2027PECO, "2027-12-31")
+		assert.NotContains(t, getPECOHolidays(2028), "2028-01-01")
+
+		h2027FPL := getFPLHolidays(2027)
+		assert.Contains(t, h2027FPL, "2027-12-31")
+		assert.NotContains(t, getFPLHolidays(2028), "2028-01-01")
+	})
 }

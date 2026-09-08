@@ -32,6 +32,7 @@ func getPSEGLIHolidays(year int) []string {
 		shiftPSEGLIWeekendHoliday(veteransDay(year)),
 		thanksgivingDay(year),
 		shiftPSEGLIWeekendHoliday(christmasDay(year)),
+		shiftPSEGLIWeekendHoliday(newYearsDay(year + 1)),
 	}
 	return formatHolidays(holidays, year)
 }

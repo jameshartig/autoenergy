@@ -25,6 +25,7 @@ func getJEAHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftJEAWeekendHoliday(christmasDay(year)),
+		shiftJEAWeekendHoliday(newYearsDay(year + 1)),
 	}
 	return formatHolidays(holidays, year)
 }
@@ -49,7 +50,6 @@ func getJEAFuelCharge(year int, month time.Month) float64 {
 			return 0.04386
 		}
 	}
-	// June 2026 and later defaults to 0.04494
 	return 0.04386
 }
 

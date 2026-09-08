@@ -82,6 +82,7 @@ func getXcelNSPHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftXcelWeekendHoliday(christmasDay(year)),
+		shiftXcelWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)
@@ -101,6 +102,7 @@ func getXcelWIHolidays(year int) []string {
 		shiftXcelWeekendHoliday(christmasEve(year)),
 		shiftXcelWeekendHoliday(christmasDay(year)),
 		shiftXcelWeekendHoliday(newYearsEve(year)),
+		shiftXcelWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)
@@ -119,6 +121,7 @@ func getXcelCOHolidays(year int) []string {
 		shiftXcelWeekendHoliday(veteransDay(year)),
 		thanksgivingDay(year),
 		shiftXcelWeekendHoliday(christmasDay(year)),
+		shiftXcelWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

@@ -29,6 +29,7 @@ func getPECOHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftPECOWeekendHoliday(christmasDay(year)),
+		shiftPECOWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

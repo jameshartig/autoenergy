@@ -57,6 +57,7 @@ func getPepcoDCHolidays(year int) []string {
 		shiftPepcoWeekendHoliday(veteransDay(year)),
 		thanksgivingDay(year),
 		shiftPepcoWeekendHoliday(christmasDay(year)),
+		shiftPepcoWeekendHoliday(newYearsDay(year + 1)),
 	}
 	return formatHolidays(holidays, year)
 }
@@ -133,7 +134,6 @@ func buildPepcoDCRPIVPeriods(year int, holidays []string, summer bool) []touSimp
 				{
 					Name:          "Off-Peak",
 					Hours:         []types.UtilityHourPeriod{{HourStart: 0, HourEnd: 24}},
-					Weekday:       true,
 					DollarsPerKWH: offPeak,
 					Description:   descOff,
 				},

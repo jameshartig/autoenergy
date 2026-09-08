@@ -78,7 +78,6 @@ func shiftDukeWeekendHoliday(t time.Time) time.Time {
 // getDukeHolidays returns Duke's holiday calendar for Carolinas/Progress (NC/SC)
 func getDukeHolidays(year int) []string {
 	thanksgiving := thanksgivingDay(year)
-	nextNY := newYearsDay(year + 1)
 
 	holidays := []time.Time{
 		shiftDukeWeekendHoliday(newYearsDay(year)),
@@ -89,10 +88,7 @@ func getDukeHolidays(year int) []string {
 		thanksgiving,
 		thanksgiving.AddDate(0, 0, 1),
 		shiftDukeWeekendHoliday(christmasDay(year)),
-	}
-
-	if nextNY.Weekday() == time.Saturday {
-		holidays = append(holidays, nextNY.AddDate(0, 0, -1))
+		shiftDukeWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)
@@ -101,8 +97,6 @@ func getDukeHolidays(year int) []string {
 // getIndianaHolidays returns Duke Energy Indiana's holiday list.
 // Holidays are: New Year's Day, Memorial Day, Independence Day, Labor Day, Thanksgiving Day, Christmas Day.
 func getIndianaHolidays(year int) []string {
-	nextNY := newYearsDay(year + 1)
-
 	holidays := []time.Time{
 		shiftDukeWeekendHoliday(newYearsDay(year)),
 		memorialDay(year),
@@ -110,10 +104,7 @@ func getIndianaHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftDukeWeekendHoliday(christmasDay(year)),
-	}
-
-	if nextNY.Weekday() == time.Saturday {
-		holidays = append(holidays, nextNY.AddDate(0, 0, -1))
+		shiftDukeWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)
@@ -1207,14 +1198,12 @@ func buildDukeFLRST1Periods(year int, holidays []string) []touSimplifiedPeriod {
 				{
 					Name:          "Super Off-Peak",
 					Hours:         []types.UtilityHourPeriod{{HourStart: 0, HourEnd: 3}},
-					Weekday:       true,
 					DollarsPerKWH: discount,
 					Description:   "RST-1 Winter Holiday Discount",
 				},
 				{
 					Name:          "Off-Peak",
 					Hours:         []types.UtilityHourPeriod{{HourStart: 3, HourEnd: 24}},
-					Weekday:       true,
 					DollarsPerKWH: offPeak,
 					Description:   "RST-1 Winter Holiday Off-Peak",
 				},
@@ -1286,14 +1275,12 @@ func buildDukeFLRST1Periods(year int, holidays []string) []touSimplifiedPeriod {
 				{
 					Name:          "Super Off-Peak",
 					Hours:         []types.UtilityHourPeriod{{HourStart: 0, HourEnd: 6}},
-					Weekday:       true,
 					DollarsPerKWH: discount,
 					Description:   "RST-1 Non-Winter Holiday Discount",
 				},
 				{
 					Name:          "Off-Peak",
 					Hours:         []types.UtilityHourPeriod{{HourStart: 6, HourEnd: 24}},
-					Weekday:       true,
 					DollarsPerKWH: offPeak,
 					Description:   "RST-1 Non-Winter Holiday Off-Peak",
 				},

@@ -25,12 +25,9 @@ func getDominionHolidays(year int) []string {
 		shiftDominionWeekendHoliday(laborDay(year)),
 		shiftDominionWeekendHoliday(thanksgivingDay(year)),
 		shiftDominionWeekendHoliday(christmasDay(year)),
+		shiftDominionWeekendHoliday(newYearsDay(year + 1)),
 	}
-	var out []string
-	for _, h := range holidays {
-		out = append(out, h.Format("2006-01-02"))
-	}
-	return out
+	return formatHolidays(holidays, year)
 }
 
 func getDominionNCHolidays(year int) []string {
@@ -45,12 +42,9 @@ func getDominionNCHolidays(year int) []string {
 		thanksgiving.AddDate(0, 0, 1),
 		shiftDominionWeekendHoliday(christmasEve(year)),
 		shiftDominionWeekendHoliday(christmasDay(year)),
+		shiftDominionWeekendHoliday(newYearsDay(year + 1)),
 	}
-	var out []string
-	for _, h := range holidays {
-		out = append(out, h.Format("2006-01-02"))
-	}
-	return out
+	return formatHolidays(holidays, year)
 }
 
 func dominionPeriods(plan string, opts types.UtilityRateOptions, years []int) []types.UtilityFeesPeriod {

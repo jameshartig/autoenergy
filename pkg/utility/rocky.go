@@ -27,11 +27,7 @@ func getRockyHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftRockyHoliday(christmasDay(year)),
-	}
-
-	nextNY := newYearsDay(year + 1)
-	if nextNY.Weekday() == time.Saturday {
-		holidays = append(holidays, nextNY.AddDate(0, 0, -1))
+		shiftRockyHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

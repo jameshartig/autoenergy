@@ -25,11 +25,7 @@ func getSRPHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftSRPWeekendHoliday(christmasDay(year)),
-	}
-
-	nextNY := newYearsDay(year + 1)
-	if nextNY.Weekday() == time.Saturday {
-		holidays = append(holidays, nextNY.AddDate(0, 0, -1))
+		shiftSRPWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

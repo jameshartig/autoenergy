@@ -35,6 +35,7 @@ func getPSEHolidays(year int) []string {
 		thanksgivingDay(year),
 		thanksgivingDay(year).AddDate(0, 0, 1), // Native American Heritage Day (day after Thanksgiving)
 		shiftPSEWeekendHoliday(christmasDay(year)),
+		shiftPSEWeekendHoliday(newYearsDay(year + 1)),
 	}
 	return formatHolidays(holidays, year)
 }

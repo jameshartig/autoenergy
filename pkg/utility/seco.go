@@ -27,6 +27,7 @@ func getSECOHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftSECOWeekendHoliday(christmasDay(year)),
+		shiftSECOWeekendHoliday(newYearsDay(year + 1)),
 	}
 	return formatHolidays(holidays, year)
 }

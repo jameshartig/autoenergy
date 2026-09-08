@@ -30,12 +30,9 @@ func getEPBHolidays(year int) []string {
 		shiftEPBWeekendHoliday(veteransDay(year)),
 		thanksgivingDay(year),
 		shiftEPBWeekendHoliday(christmasDay(year)),
+		shiftEPBWeekendHoliday(newYearsDay(year + 1)),
 	}
-	var out []string
-	for _, h := range holidays {
-		out = append(out, h.Format("2006-01-02"))
-	}
-	return out
+	return formatHolidays(holidays, year)
 }
 
 func epbFCAPeriods(years []int) []types.UtilityFeesPeriod {
@@ -120,12 +117,9 @@ func getEPBDPPHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftEPBWeekendHoliday(christmasDay(year)),
+		shiftEPBWeekendHoliday(newYearsDay(year + 1)),
 	}
-	var out []string
-	for _, h := range holidays {
-		out = append(out, h.Format("2006-01-02"))
-	}
-	return out
+	return formatHolidays(holidays, year)
 }
 
 func buildEPBDPPBPeriod(

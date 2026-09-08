@@ -25,6 +25,7 @@ func getWEHolidays(year int) []string {
 		laborDay(year),
 		thanksgivingDay(year),
 		shiftWEWeekendHoliday(christmasDay(year)),
+		shiftWEWeekendHoliday(newYearsDay(year + 1)),
 	}
 	return formatHolidays(holidays, year)
 }

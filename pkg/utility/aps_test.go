@@ -174,6 +174,17 @@ func TestAPSRates(t *testing.T) {
 		})
 		require.NoError(t, err)
 
+		periods, err := u.GetPeriods(context.Background())
+		require.NoError(t, err)
+		names := make(map[string]bool)
+		for _, p := range periods {
+			names[p.Name] = true
+		}
+		assert.True(t, names["On-Peak"])
+		assert.True(t, names["Off-Peak"])
+		assert.True(t, names["Overnight"])
+		assert.True(t, names["Super Off-Peak"])
+
 		// Summer weekday On-Peak (Wed, July 15, 2026, 5:00 PM) -> $0.36824
 		p, err := u.priceForTime(time.Date(2026, time.July, 15, 17, 0, 0, 0, mstLocation))
 		require.NoError(t, err)
@@ -188,6 +199,16 @@ func TestAPSRates(t *testing.T) {
 		p, err = u.priceForTime(time.Date(2026, time.July, 18, 2, 0, 0, 0, mstLocation))
 		require.NoError(t, err)
 		assert.InDelta(t, 0.12345, p.DollarsPerKWH, 1e-6)
+
+		// Winter weekday Super Off-Peak (Wed, Dec 16, 2026, 12:00 PM) -> $0.03495
+		p, err = u.priceForTime(time.Date(2026, time.December, 16, 12, 0, 0, 0, mstLocation))
+		require.NoError(t, err)
+		assert.InDelta(t, 0.03495, p.DollarsPerKWH, 1e-6)
+
+		// Winter weekday Overnight (Wed, Dec 16, 2026, 2:00 AM) -> $0.08468
+		p, err = u.priceForTime(time.Date(2026, time.December, 16, 2, 0, 0, 0, mstLocation))
+		require.NoError(t, err)
+		assert.InDelta(t, 0.08468, p.DollarsPerKWH, 1e-6)
 	})
 }
 

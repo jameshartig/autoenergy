@@ -654,6 +654,7 @@ func getPGEHolidays(year int) []string {
 		shiftPGEWeekendHoliday(veteransDay(year)),
 		thanksgivingDay(year),
 		shiftPGEWeekendHoliday(christmasDay(year)),
+		shiftPGEWeekendHoliday(newYearsDay(year + 1)),
 	}
 
 	return formatHolidays(holidays, year)

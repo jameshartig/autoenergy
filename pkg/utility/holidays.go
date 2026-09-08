@@ -2,6 +2,11 @@ package utility
 
 import "time"
 
+// newYearsDay returns New Year's Day (January 1) for the given year.
+// Note: When January 1 falls on a Saturday, many utilities observe New Year's Day on
+// Friday, December 31 of the preceding year. To ensure this observed holiday is captured,
+// holiday generators should evaluate both newYearsDay(year) and newYearsDay(year + 1) through
+// their weekend shift functions, allowing formatHolidays to filter the observed dates for year.
 func newYearsDay(year int) time.Time {
 	return time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
 }
