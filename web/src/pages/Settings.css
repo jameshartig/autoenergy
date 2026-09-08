@@ -747,3 +747,82 @@
 .switch-group.disabled .switch-root {
   pointer-events: none;
 }
+
+/* Docked Unsaved Changes Bar */
+.unsaved-changes-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  background: rgba(26, 28, 32, 0.94);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid var(--outline-variant);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+  padding: 0.75rem 1.5rem;
+  animation: slideUpUnsaved 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideUpUnsaved {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.unsaved-changes-content {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.unsaved-changes-text {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--on-surface);
+}
+
+.unsaved-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning);
+}
+
+.unsaved-changes-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .unsaved-changes-bar {
+    padding: 0.75rem 1rem;
+  }
+
+  .unsaved-changes-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .unsaved-changes-actions {
+    display: flex;
+    width: 100%;
+  }
+
+  .unsaved-changes-actions button {
+    flex: 1;
+  }
+}

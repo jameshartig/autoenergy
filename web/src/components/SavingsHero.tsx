@@ -26,7 +26,7 @@ const SavingsHero: React.FC<SavingsHeroProps> = ({ savings }) => {
             <Collapsible.Root open={isMobile ? open : true} onOpenChange={setOpen}>
                 <div className="overview-hero">
                     <div className="net-savings-panel">
-                        <span className="hero-label">Savings Today</span>
+                        <span className="hero-label">Savings</span>
                         <div className="hero-value-group">
                             <span className={`hero-value ${netSavings >= 0 ? 'positive' : 'negative'}`}>
                                 {formatCurrency(netSavings)}
@@ -100,7 +100,7 @@ const SavingsHero: React.FC<SavingsHeroProps> = ({ savings }) => {
                                 </div>
                                 <div className="stat-card">
                                     <span className="stat-label">Total Cost</span>
-                                    <span className="stat-value">$ {savings.cost.toFixed(2)}</span>
+                                    <span className="stat-value">{formatCurrency(savings.cost)}</span>
                                 </div>
                             </div>
                         </div>

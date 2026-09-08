@@ -77,7 +77,7 @@ describe('CurrentStatus', () => {
             capacityAt: '2026-06-15T17:00:00Z',
         };
         render(<CurrentStatus action={action} />);
-        expect(screen.getByText('Capacity in 5 hours')).toBeInTheDocument();
+        expect(screen.getByText('Battery full in 5 hours')).toBeInTheDocument();
 
         vi.useRealTimers();
     });
@@ -92,7 +92,7 @@ describe('CurrentStatus', () => {
             deficitAt: '2026-06-15T12:45:00Z',
         };
         render(<CurrentStatus action={action} />);
-        expect(screen.getByText('Deficit in 45 minutes')).toBeInTheDocument();
+        expect(screen.getByText('Battery empty in 45 minutes')).toBeInTheDocument();
 
         vi.useRealTimers();
     });
@@ -108,7 +108,7 @@ describe('CurrentStatus', () => {
             deficitAt: '2026-06-15T15:00:00Z',
         };
         render(<CurrentStatus action={action} />);
-        expect(screen.getByText('Deficit in 3 hours')).toBeInTheDocument();
+        expect(screen.getByText('Battery empty in 3 hours')).toBeInTheDocument();
 
         vi.useRealTimers();
     });
@@ -127,5 +127,34 @@ describe('CurrentStatus', () => {
         expect(screen.getByText('Battery At Reserve')).toBeInTheDocument();
         expect(screen.getByText('Holding Reserve')).toBeInTheDocument();
         expect(screen.getByText('🔋')).toBeInTheDocument();
+    });
+
+    it('does not render price when currentPrice has uninitialized 0001-01-01 timestamp', () => {
+        const action: Action = {
+            ...defaultAction,
+            currentPrice: {
+                tsStart: '0001-01-01T00:00:00Z',
+                tsEnd: '0001-01-01T00:00:00Z',
+                dollarsPerKWH: 0,
+                gridUseDollarsPerKWH: 0
+            }
+        };
+        render(<CurrentStatus action={action} />);
+        expect(screen.queryByText('Price')).not.toBeInTheDocument();
+    });
+
+    it('renders -- when batterySOC is missing/undefined', () => {
+        const action: Action = {
+            ...defaultAction,
+            systemStatus: {
+                batteryPower: 0,
+                solarPower: 0,
+                gridPower: 0,
+                loadPower: 0
+            }
+        };
+        render(<CurrentStatus action={action} />);
+        expect(screen.getByText('--')).toBeInTheDocument();
+        expect(screen.queryByText('0.0%')).not.toBeInTheDocument();
     });
 });

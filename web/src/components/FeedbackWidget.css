@@ -1,3 +1,14 @@
+.feedback-widget-container,
+.feedback-popup {
+    --bg-color: var(--surface-container-high, #282a2e);
+    --text-color: var(--on-surface, #e2e2e8);
+    --text-muted-color: var(--text-muted, #8b90a0);
+    --border-color: var(--outline-variant, #414755);
+    --bg-hover-color: var(--surface-container-highest, #333539);
+    --primary-color: var(--primary, #4b8eff);
+    --primary-hover-color: var(--primary-glow, #adc6ff);
+}
+
 .feedback-widget-container {
     position: fixed;
     bottom: 24px;
@@ -9,10 +20,10 @@
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background-color: var(--primary-color, #10b981);
-    color: white;
+    background-color: var(--primary-color, #4b8eff);
+    color: var(--on-primary, #001a41);
     border: none;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.2);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -23,15 +34,15 @@
 
 .feedback-fab:hover {
     transform: scale(1.05);
-    background-color: var(--primary-hover-color, #059669);
+    background-color: var(--primary-hover-color, #adc6ff);
 }
 
 .feedback-fab[data-popup-open] {
-    background-color: var(--primary-hover-color, #059669);
+    background-color: var(--primary-hover-color, #adc6ff);
 }
 
 .feedback-fab:focus-visible {
-    outline: 2px solid var(--primary-color, #10b981);
+    outline: 2px solid var(--primary-color, #4b8eff);
     outline-offset: -1px;
 }
 
@@ -39,8 +50,8 @@
     box-sizing: border-box;
     padding: 20px;
     border-radius: 12px;
-    background-color: var(--bg-color, white);
-    color: var(--text-color, #111827);
+    background-color: var(--bg-color, #282a2e);
+    color: var(--text-color, #e2e2e8);
     transform-origin: var(--transform-origin);
     transition:
       transform 150ms,
@@ -55,8 +66,8 @@
     flex-direction: column;
     gap: 16px;
 
-    outline: 1px solid var(--border-color, #e5e7eb);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    outline: 1px solid var(--border-color, #414755);
+    box-shadow: var(--shadow-md, 0 12px 32px rgba(0, 0, 0, 0.4));
 }
 
 .feedback-popup[data-starting-style],
@@ -90,28 +101,29 @@
 }
 
 .feedback-arrow-fill {
-    fill: var(--bg-color, white);
+    fill: var(--bg-color, #282a2e);
 }
 
 .feedback-arrow-outer-stroke {
-    fill: var(--border-color, #e5e7eb);
+    fill: var(--border-color, #414755);
 }
 
 .feedback-arrow-inner-stroke {
-    /* Used for dark mode */
+    fill: var(--bg-color, #282a2e);
 }
 
 .feedback-title {
     margin: 0;
     font-size: 18px;
-    color: var(--text-color, #111827);
+    font-weight: 600;
+    color: var(--text-color, #e2e2e8);
 }
 
 .feedback-desc {
     margin: 0;
     font-size: 14px;
     line-height: 1.5rem;
-    color: var(--text-muted-color, #6b7280);
+    color: var(--text-muted-color, #8b90a0);
 }
 
 .feedback-sentiment {
@@ -139,18 +151,19 @@
     filter: grayscale(0%);
     opacity: 1;
     transform: scale(1.1);
+    background-color: var(--bg-hover-color, #333539);
 }
 
 .sentiment-btn:focus-visible {
-    outline: 2px solid var(--primary-color, #10b981);
+    outline: 2px solid var(--primary-color, #4b8eff);
     outline-offset: 2px;
 }
 
 .sentiment-btn.selected {
     filter: grayscale(0%);
     opacity: 1;
-    background-color: var(--bg-hover-color, #f3f4f6);
-    border-color: var(--primary-color, #10b981);
+    background-color: var(--bg-hover-color, #333539);
+    border-color: var(--primary-color, #4b8eff);
 }
 
 .feedback-textarea {
@@ -158,17 +171,24 @@
     min-height: 100px;
     resize: vertical;
     padding: 12px;
-    border: 1px solid var(--border-color, #d1d5db);
+    background-color: var(--surface-container-low, #1a1c20);
+    color: var(--on-surface, #e2e2e8);
+    border: 1px solid var(--border-color, #414755);
     border-radius: 6px;
     font-family: inherit;
     font-size: 14px;
     box-sizing: border-box;
 }
 
+.feedback-textarea::placeholder {
+    color: var(--text-muted-color, #8b90a0);
+    opacity: 0.7;
+}
+
 .feedback-textarea:focus {
     outline: none;
-    border-color: var(--primary-color, #10b981);
-    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    border-color: var(--primary-color, #4b8eff);
+    box-shadow: 0 0 0 2px rgba(75, 142, 255, 0.2);
 }
 
 .feedback-actions {
@@ -180,54 +200,57 @@
 .feedback-cancel-btn {
     background: none;
     border: none;
-    color: var(--text-muted-color, #6b7280);
+    color: var(--text-muted-color, #8b90a0);
     cursor: pointer;
     font-weight: 500;
     padding: 8px 16px;
     border-radius: 6px;
+    transition: background-color 0.2s, color 0.2s;
 }
 
 .feedback-cancel-btn:focus-visible {
-    outline: 2px solid var(--primary-color, #10b981);
+    outline: 2px solid var(--primary-color, #4b8eff);
     outline-offset: 2px;
 }
 
 .feedback-cancel-btn:hover {
-    background-color: var(--bg-hover-color, #f3f4f6);
+    background-color: var(--bg-hover-color, #333539);
+    color: var(--text-color, #e2e2e8);
 }
 
 .feedback-submit-btn {
-    background-color: var(--primary-color, #10b981);
-    color: white;
+    background-color: var(--primary-color, #4b8eff);
+    color: var(--on-primary, #001a41);
     border: none;
     border-radius: 6px;
     padding: 8px 16px;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
+    transition: background-color 0.2s;
 }
 
 .feedback-submit-btn:focus-visible {
-    outline: 2px solid var(--primary-color, #10b981);
+    outline: 2px solid var(--primary-color, #4b8eff);
     outline-offset: 2px;
 }
 
 .feedback-submit-btn:hover:not(:disabled) {
-    background-color: var(--primary-hover-color, #059669);
+    background-color: var(--primary-hover-color, #adc6ff);
 }
 
 .feedback-submit-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
 }
 
 .feedback-success {
     text-align: center;
     padding: 20px 0;
-    color: var(--primary-color, #10b981);
+    color: var(--primary-color, #4b8eff);
 }
 
 .feedback-error {
-    color: #ef4444;
+    color: var(--danger, #ff4b4b);
     font-size: 14px;
     margin-top: -8px;
 }

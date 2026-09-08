@@ -32,7 +32,7 @@ const historyCharts: ChartConfig[] = [
         title: 'Battery (%)',
         unit: '%',
         dataKeys: [
-            { key: 'maxBatterySOC', color: 'var(--accent)', label: 'Max SOC', type: 'area', fill: 'var(--accent-vaint)' }
+            { key: 'maxBatterySOC', color: 'var(--accent)', label: 'Max SOC', type: 'area', fill: 'var(--accent-variant)' }
         ]
     },
     {
@@ -165,6 +165,7 @@ const History: React.FC<{ siteID?: string }> = ({ siteID }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
     const settingsRef = useRef<SettingsType | null>(null);
     const loadedSiteIDRef = useRef<string | undefined>(undefined);
+    const isFirstMount = useRef(true);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -176,7 +177,11 @@ const History: React.FC<{ siteID?: string }> = ({ siteID }) => {
     }, []);
 
     useEffect(() => {
-        const loadData = async () => {
+        let isCancelled = false;
+        const delay = isFirstMount.current ? 0 : 200;
+        isFirstMount.current = false;
+
+        const timer = setTimeout(async () => {
             setLoading(true);
             setError(null);
             try {
@@ -189,6 +194,7 @@ const History: React.FC<{ siteID?: string }> = ({ siteID }) => {
                     fetchHistoryEnergy(currentDate, siteID),
                     fetchSettingsPromise
                 ]);
+                if (isCancelled) return;
                 setSettings(s);
                 settingsRef.current = s;
                 loadedSiteIDRef.current = siteID;
@@ -211,12 +217,20 @@ const History: React.FC<{ siteID?: string }> = ({ siteID }) => {
 
                 setData(merged.sort((a, b) => new Date(a.tsHourStart).getTime() - new Date(b.tsHourStart).getTime()));
             } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to load history');
+                if (!isCancelled) {
+                    setError(err instanceof Error ? err.message : 'Failed to load history');
+                }
             } finally {
-                setLoading(false);
+                if (!isCancelled) {
+                    setLoading(false);
+                }
             }
+        }, delay);
+
+        return () => {
+            isCancelled = true;
+            clearTimeout(timer);
         };
-        loadData();
     }, [currentDate, siteID]);
 
     const handleDateChange = (days: number) => {

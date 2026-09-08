@@ -480,7 +480,7 @@ const Forecast: React.FC<{ siteID?: string }> = ({ siteID }) => {
                     return startTs ? formatTime(startTs, data[0]?.ts) : '';
                 })()}
             </p>
-            <div className="modeling-charts">
+            <div className="forecast-charts">
                 {charts.map((config) => {
                     const headerAction = config.dataKey === 'avgHomeLoadKWH' ? (
                         <Field.Root className="form-group switch-group compact" style={{ margin: 0 }}>

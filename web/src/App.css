@@ -1512,7 +1512,12 @@ button {
   text-decoration: underline;
 }
 
-/* Remove default focus outline from Recharts */
+/* Remove default focus outline from Recharts and allow vertical page scrolling */
+.recharts-wrapper,
+.recharts-surface {
+  touch-action: pan-y;
+}
+
 .recharts-wrapper,
 .recharts-surface,
 .recharts-wrapper *:focus,

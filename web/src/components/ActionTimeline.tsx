@@ -130,10 +130,10 @@ const ActionTimeline: React.FC<ActionTimelineProps> = ({ groupedActions }) => {
                                     </span>
                                 )}
                                 {showDeficitTag && (
-                                    <span className="tag tag-info">Deficit: {formatTime(action.deficitAt!, refTs)}</span>
+                                    <span className="tag tag-info">Empty: {formatTime(action.deficitAt!, refTs)}</span>
                                 )}
                                 {showCapacityTag && (
-                                    <span className="tag tag-info">Capacity: {formatTime(action.capacityAt!, refTs)}</span>
+                                    <span className="tag tag-info">Full: {formatTime(action.capacityAt!, refTs)}</span>
                                 )}
                                 {isNegPrice && (
                                     <span className="tag tag-warning">Negative Price</span>

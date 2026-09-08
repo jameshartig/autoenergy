@@ -8,9 +8,29 @@ interface CurrentStatusProps {
 }
 
 const CurrentStatus: React.FC<CurrentStatusProps> = ({ action }) => {
-    const soc = action.systemStatus?.batterySOC ?? 0;
-    const hasPrice = action.currentPrice !== undefined;
+    const hasSOC = action.systemStatus?.batterySOC !== undefined && action.systemStatus?.batterySOC !== null;
+    const soc = hasSOC ? action.systemStatus!.batterySOC! : 0;
+    const isUninitializedPrice = Boolean(action.currentPrice?.tsStart?.startsWith('0001-01-01') || action.currentPrice?.tsEnd?.startsWith('0001-01-01'));
+    const hasPrice = action.currentPrice !== undefined && !isUninitializedPrice;
     const price = hasPrice ? (action.currentPrice!.dollarsPerKWH + (action.currentPrice!.gridUseDollarsPerKWH || 0)) : 0;
+
+    const renderBatteryMetric = () => (
+        <div className="metric">
+            <span className="metric-label">Battery</span>
+            {hasSOC ? (
+                <>
+                    <span className="metric-value">{soc.toFixed(1)}%</span>
+                    <Meter.Root className="battery-bar" value={soc} min={0} max={100} aria-label="Battery Percentage">
+                        <Meter.Track className="battery-track">
+                            <Meter.Indicator className="battery-fill" />
+                        </Meter.Track>
+                    </Meter.Root>
+                </>
+            ) : (
+                <span className="metric-value">--</span>
+            )}
+        </div>
+    );
 
     if (action.paused) {
         return (
@@ -25,15 +45,7 @@ const CurrentStatus: React.FC<CurrentStatusProps> = ({ action }) => {
                     </div>
                 </div>
                 <div className="status-metrics">
-                    <div className="metric">
-                        <span className="metric-label">Battery</span>
-                        <span className="metric-value">{soc.toFixed(1)}%</span>
-                        <Meter.Root className="battery-bar" value={soc} min={0} max={100} aria-label="Battery Percentage">
-                            <Meter.Track className="battery-track">
-                                <Meter.Indicator className="battery-fill" />
-                            </Meter.Track>
-                        </Meter.Root>
-                    </div>
+                    {renderBatteryMetric()}
                     {hasPrice && (
                         <div className="metric">
                             <span className="metric-label">Price</span>
@@ -58,15 +70,7 @@ const CurrentStatus: React.FC<CurrentStatusProps> = ({ action }) => {
                     </div>
                 </div>
                 <div className="status-metrics">
-                    <div className="metric">
-                        <span className="metric-label">Battery</span>
-                        <span className="metric-value">{soc.toFixed(1)}%</span>
-                        <Meter.Root className="battery-bar" value={soc} min={0} max={100} aria-label="Battery Percentage">
-                            <Meter.Track className="battery-track">
-                                <Meter.Indicator className="battery-fill" />
-                            </Meter.Track>
-                        </Meter.Root>
-                    </div>
+                    {renderBatteryMetric()}
                 </div>
             </div>
         );
@@ -86,15 +90,7 @@ const CurrentStatus: React.FC<CurrentStatusProps> = ({ action }) => {
                     </div>
                 </div>
                 <div className="status-metrics">
-                    <div className="metric">
-                        <span className="metric-label">Battery</span>
-                        <span className="metric-value">{soc.toFixed(1)}%</span>
-                        <Meter.Root className="battery-bar" value={soc} min={0} max={100} aria-label="Battery Percentage">
-                            <Meter.Track className="battery-track">
-                                <Meter.Indicator className="battery-fill" />
-                            </Meter.Track>
-                        </Meter.Root>
-                    </div>
+                    {renderBatteryMetric()}
                     {hasPrice && (
                         <div className="metric">
                             <span className="metric-label">Price</span>
@@ -150,9 +146,9 @@ const CurrentStatus: React.FC<CurrentStatusProps> = ({ action }) => {
     const defValid = deficitMs !== null && deficitMs > 0;
 
     if (defValid) {
-        timeRemainingText = `Deficit in ${formatDuration(deficitMs)}`;
+        timeRemainingText = `Battery empty in ${formatDuration(deficitMs)}`;
     } else if (capValid) {
-        timeRemainingText = `Capacity in ${formatDuration(capacityMs)}`;
+        timeRemainingText = `Battery full in ${formatDuration(capacityMs)}`;
     }
 
     const statusLabel = isBatteryAtReserve
@@ -190,15 +186,7 @@ const CurrentStatus: React.FC<CurrentStatusProps> = ({ action }) => {
                 </div>
             </div>
             <div className="status-metrics">
-                <div className="metric">
-                    <span className="metric-label">Battery</span>
-                    <span className="metric-value">{soc.toFixed(1)}%</span>
-                    <Meter.Root className="battery-bar" value={soc} min={0} max={100} aria-label="Battery Percentage">
-                        <Meter.Track className="battery-track">
-                            <Meter.Indicator className="battery-fill" />
-                        </Meter.Track>
-                    </Meter.Root>
-                </div>
+                {renderBatteryMetric()}
                 {hasPrice && (
                     <div className="metric">
                         <span className="metric-label">Price</span>

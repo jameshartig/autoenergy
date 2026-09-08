@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useLocation, useSearch, Link } from 'wouter';
 import { type Action, type SavingsStats, type Settings, fetchActionsAndSavings, BatteryMode, ActionReason } from '../api';
 import CurrentStatus from '../components/CurrentStatus';
@@ -94,8 +94,14 @@ const Dashboard: React.FC<{ siteID?: string, settings?: Settings | null }> = ({ 
         return new Date();
     }, [dateQuery]);
 
+    const isFirstMount = useRef(true);
+
     useEffect(() => {
-        const loadData = async () => {
+        let isCancelled = false;
+        const delay = isFirstMount.current ? 0 : 200;
+        isFirstMount.current = false;
+
+        const timer = setTimeout(async () => {
             setLoading(true);
             setError(null);
             try {
@@ -107,17 +113,26 @@ const Dashboard: React.FC<{ siteID?: string, settings?: Settings | null }> = ({ 
 
                 const actionsAndSavingsData = await fetchActionsAndSavings(start, end, siteID);
 
-                setActions(actionsAndSavingsData.actions || []);
-                setSavings(actionsAndSavingsData.savings);
+                if (!isCancelled) {
+                    setActions(actionsAndSavingsData.actions || []);
+                    setSavings(actionsAndSavingsData.savings);
+                }
             } catch (err) {
-                console.error(err);
-                setError(err instanceof Error ? err.message : 'Failed to load data');
+                if (!isCancelled) {
+                    console.error(err);
+                    setError(err instanceof Error ? err.message : 'Failed to load data');
+                }
             } finally {
-                setLoading(false);
+                if (!isCancelled) {
+                    setLoading(false);
+                }
             }
-        };
+        }, delay);
 
-        loadData();
+        return () => {
+            isCancelled = true;
+            clearTimeout(timer);
+        };
     }, [currentDate, siteID]);
 
     const handleDateChange = useCallback((days: number) => {

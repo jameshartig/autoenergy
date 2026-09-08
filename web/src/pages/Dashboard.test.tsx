@@ -328,7 +328,7 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText('Savings Today')).toBeInTheDocument();
+            expect(screen.getByText('Savings')).toBeInTheDocument();
             // Net savings: 5.50 (battery) + 5.00 (solar) + 1.00 (credit) = 11.50
             expect(screen.getByText(/\$ 11\.50/)).toBeInTheDocument();
             expect(screen.getByText('Solar')).toBeInTheDocument();
@@ -377,7 +377,7 @@ describe('Dashboard', () => {
 
         await waitFor(() => {
             // Net savings: 1.00 (solar) - 2.50 (battery) - 0.50 (credit) = -2.00
-            expect(screen.getByText('Savings Today')).toBeInTheDocument();
+            expect(screen.getByText('Savings')).toBeInTheDocument();
             const netValue = screen.getByText(/- \$ 2\.00/);
             expect(netValue).toBeInTheDocument();
             expect(netValue).toHaveClass('negative');
@@ -762,16 +762,16 @@ describe('Dashboard', () => {
             expect(screen.getByText(/42\.5%/)).toBeInTheDocument();
             expect(screen.getByText(/Range: 40% - 45%/)).toBeInTheDocument();
 
-            // Should show Deficit and Capacity tags from the LATEST action
+            // Should show Empty and Full tags from the LATEST action
             // Using a more flexible regex for time as it depends on local timezone
-            expect(screen.getByText(/Deficit:/)).toBeInTheDocument();
-            expect(screen.getByText(/Capacity:/)).toBeInTheDocument();
+            expect(screen.getByText(/Empty:/)).toBeInTheDocument();
+            expect(screen.getByText(/Full:/)).toBeInTheDocument();
 
-            // Check that some element contains the Deficit/Capacity text with some time format
+            // Check that some element contains the Empty/Full text with some time format
             const tags = document.querySelectorAll('.tag-info');
             const tagTexts = Array.from(tags).map(t => t.textContent);
-            expect(tagTexts.some(t => t?.includes('Deficit:'))).toBe(true);
-            expect(tagTexts.some(t => t?.includes('Capacity:'))).toBe(true);
+            expect(tagTexts.some(t => t?.includes('Empty:'))).toBe(true);
+            expect(tagTexts.some(t => t?.includes('Full:'))).toBe(true);
         });
     });
 
@@ -894,7 +894,7 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard siteID="ALL" settings={null} />);
 
         await waitFor(() => {
-            expect(screen.getByText('Savings Today')).toBeInTheDocument();
+            expect(screen.getByText('Savings')).toBeInTheDocument();
             expect(screen.getByText(/\$ 32\.00/)).toBeInTheDocument(); // 10+20+2
         });
 

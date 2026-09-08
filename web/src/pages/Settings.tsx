@@ -682,7 +682,30 @@ const ESSForm = ({
     );
 
     if (isWizard) {
-        return renderFormFields();
+        return (
+            <>
+                {renderFormFields()}
+                <Field.Root className="form-group" style={{ marginTop: '1.25rem' }}>
+                    <Field.Label htmlFor="wizard-minBatterySOC">
+                        Emergency Backup Reserve %
+                        <HelpButton
+                            title="Emergency Backup Reserve %"
+                            description="Sets the minimum state-of-charge (SOC) level that RateRudder must preserve in your battery. RateRudder will avoid discharging the battery below this reserve to protect against power outages and grid disruptions."
+                        />
+                    </Field.Label>
+                    <Input
+                        id="wizard-minBatterySOC"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        value={settings.minBatterySOC ?? 20}
+                        onChange={(e) => onChange('minBatterySOC', e.target.value === '' ? ('' as any) : parseFloat(e.target.value))}
+                    />
+                    <Field.Description>Reserve kept in the battery for emergency backup during outages.</Field.Description>
+                </Field.Root>
+            </>
+        );
     }
 
     return (
@@ -994,19 +1017,22 @@ const Settings = ({
     };
 
     const validate24HourCoverage = (periods: MinBatterySOCPeriod[]) => {
+        const hasCustomHours = periods.some(p => !p.utilityPeriodName && p.hours && p.hours.length > 0);
+        if (!hasCustomHours) {
+            return null;
+        }
         const counts = new Array(24).fill(0);
         for (const p of periods) {
             if (p.utilityPeriodName) continue;
             for (const hp of p.hours || []) {
                 const start = hp.hourStart;
                 const end = hp.hourEnd;
+                if (start === end) continue;
                 for (let h = 0; h < 24; h++) {
                     if (start < end) {
                         if (h >= start && h < end) counts[h]++;
                     } else if (start > end) {
                         if (h >= start || h < end) counts[h]++;
-                    } else {
-                        counts[h]++;
                     }
                 }
             }
@@ -1044,6 +1070,7 @@ const Settings = ({
     const [essCredentials, setEssCredentials] = useState<Record<string, string>>({});
     const [oauthStatus, setOauthStatus] = useState<'idle' | 'popup_open' | 'success'>('idle');
     const savingRef = useRef(false);
+    const originalSettingsRef = useRef<string | null>(null);
     const oauthTimerRef = useRef<any>(null);
     const oauthListenerRef = useRef<((event: MessageEvent) => void) | null>(null);
 
@@ -1133,18 +1160,48 @@ const Settings = ({
 
     useEffect(() => {
         if (parentSettings) {
-            setSettings({
+            const initial = {
                 ...parentSettings,
                 gridChargeBatteries: parentSettings.gridChargeBatteries ?? true,
                 gridExportSolar: parentSettings.gridExportSolar ?? false,
                 gridExportBatteries: parentSettings.gridExportBatteries ?? false
-            });
+            };
+            setSettings(initial);
+            if (!originalSettingsRef.current) {
+                originalSettingsRef.current = JSON.stringify(initial);
+            }
             if (parentSettings.ess && !parentSettings.hasCredentials?.[parentSettings.ess]) {
                 setEditESS(true);
                 setIsESSDirty(true);
             }
         }
     }, [parentSettings]);
+
+    const isDirty = Boolean(
+        settings &&
+        originalSettingsRef.current &&
+        JSON.stringify(settings) !== originalSettingsRef.current
+    );
+
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (isDirty && !savingRef.current) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [isDirty]);
+
+    const handleDiscard = () => {
+        if (originalSettingsRef.current) {
+            setSettings(JSON.parse(originalSettingsRef.current));
+            setIsUtilityDirty(false);
+            setIsESSDirty(false);
+            setError(null);
+        }
+    };
 
     const handleESSContinue = async (e?: React.FormEvent | React.MouseEvent) => {
         if (e) {
@@ -1183,6 +1240,14 @@ const Settings = ({
         }
 
         const isESSAlreadyConfigured = settings ? (!!settings.ess && settings.ess !== "" && !!settings.hasCredentials?.[settings.ess]) : false;
+
+        if (settings.minBatterySOCPeriods && settings.minBatterySOCPeriods.length > 0) {
+            const coverageError = validate24HourCoverage(settings.minBatterySOCPeriods);
+            if (coverageError) {
+                setError(coverageError);
+                return;
+            }
+        }
 
         try {
             savingRef.current = true;
@@ -1287,6 +1352,7 @@ const Settings = ({
             }
             setIsUtilityDirty(false);
             setIsESSDirty(false);
+            originalSettingsRef.current = JSON.stringify(updatedSettings);
 
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
@@ -1847,7 +1913,7 @@ const Settings = ({
                 </div>
             )}
             <h2>Settings</h2>
-            <form onSubmit={handleSubmit}>
+            <form id="settings-form" onSubmit={handleSubmit}>
                 {/* Battery section at the top */}
                 <div className="settings-section" data-testid="battery-section">
                     <div className="section-header">
@@ -2995,6 +3061,36 @@ const Settings = ({
                     </Dialog.Root>
                 </div>
             </div>
+
+            {isDirty && !isInWizard && (
+                <div className="unsaved-changes-bar" data-testid="unsaved-changes-bar">
+                    <div className="unsaved-changes-content">
+                        <div className="unsaved-changes-text">
+                            <span className="unsaved-dot" aria-hidden="true" />
+                            <span>You have unsaved changes</span>
+                        </div>
+                        <div className="unsaved-changes-actions">
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                disabled={isSaving}
+                                onClick={handleDiscard}
+                            >
+                                Discard
+                            </button>
+                            <button
+                                type="submit"
+                                form="settings-form"
+                                className="btn btn-primary"
+                                disabled={isSaving}
+                            >
+                                {isSaving && <span className="loading-spinner" aria-hidden="true" style={{ marginRight: '0.5rem' }}></span>}
+                                {isSaving ? 'Saving...' : 'Save Changes'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {renderTeslaGridModal()}
         </div>

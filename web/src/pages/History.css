@@ -13,6 +13,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-lg);
+    touch-action: pan-y;
+}
+
+.history-page .chart-card {
+    touch-action: pan-y;
 }
 
 .history-page .loading,
