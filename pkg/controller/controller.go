@@ -172,7 +172,7 @@ func (c *Controller) Decide(
 	// we immediately decide to charge the battery. This overrides all other optimization evaluations because
 	// the energy is essentially free or so cheap that it is guaranteed to yield maximum economic savings, regardless
 	// of load shapes, solar forecasts, or future peaks.
-	if !currentStatus.BatteryChargingDisabled && gridChargeNowCost <= settings.AlwaysChargeUnderDollarsPerKWH {
+	if settings.GridChargeBatteries && !currentStatus.BatteryChargingDisabled && gridChargeNowCost <= settings.AlwaysChargeUnderDollarsPerKWH {
 		desc := fmt.Sprintf(
 			"Price Low (%.3f < %.3f). Charging.",
 			gridChargeNowCost,
@@ -354,24 +354,48 @@ func (c *Controller) Decide(
 		return dec, nil
 	}
 
+	var plannedChargeFallbackDecision *DecisionResult
+	var plannedChargeFallbackBenefit float64
+
 	if activePlan != nil {
-		planDecision := c.evaluatePlannedCharge(ctx, now, currentStatus, currentPrice, settings, simData, summary, *activePlan, lastAction)
-		log.Ctx(ctx).DebugContext(ctx, "executing active planned charge",
-			slog.Time("planTime", activePlan.Time),
-			slog.Float64("planCost", activePlan.Cost),
-			slog.String("mode", drModeString(planDecision.BatteryMode)),
-			slog.String("reason", string(planDecision.Reason)),
-			slog.Float64("gridChargeNowCost", gridChargeNowCost),
-			slog.Float64("batterySOC", currentStatus.BatterySOC),
-			slog.String("description", activePlan.Description),
-		)
-		dec := buildFinalDecision(planDecision)
-		dec.Action.StrategyBenefitDollars = bestPlan.BenefitDollars
-		return dec, nil
+		planImmediate, planFallback := c.evaluatePlannedCharge(ctx, now, currentStatus, currentPrice, settings, simData, summary, *activePlan, lastAction)
+		if planImmediate != nil {
+			log.Ctx(ctx).DebugContext(ctx, "executing active planned charge",
+				slog.Time("planTime", activePlan.Time),
+				slog.Float64("planCost", activePlan.Cost),
+				slog.String("mode", drModeString(planImmediate.BatteryMode)),
+				slog.String("reason", string(planImmediate.Reason)),
+				slog.Float64("gridChargeNowCost", gridChargeNowCost),
+				slog.Float64("batterySOC", currentStatus.BatterySOC),
+				slog.String("description", activePlan.Description),
+			)
+			dec := buildFinalDecision(planImmediate)
+			dec.Action.StrategyBenefitDollars = bestPlan.BenefitDollars
+			return dec, nil
+		}
+		if planFallback != nil {
+			log.Ctx(ctx).DebugContext(ctx, "planned charge fallback decision evaluated",
+				slog.Time("planTime", activePlan.Time),
+				slog.Float64("planCost", activePlan.Cost),
+				slog.String("mode", drModeString(planFallback.BatteryMode)),
+				slog.String("reason", string(planFallback.Reason)),
+				slog.Float64("gridChargeNowCost", gridChargeNowCost),
+				slog.Float64("batterySOC", currentStatus.BatterySOC),
+				slog.String("description", activePlan.Description),
+			)
+			plannedChargeFallbackDecision = planFallback
+			plannedChargeFallbackBenefit = bestPlan.BenefitDollars
+		}
 	}
 
 	if evDecision := c.evaluateEVCharging(ctx, now, currentStatus, history, settings); evDecision != nil {
 		return buildFinalDecision(evDecision), nil
+	}
+
+	if plannedChargeFallbackDecision != nil {
+		dec := buildFinalDecision(plannedChargeFallbackDecision)
+		dec.Action.StrategyBenefitDollars = plannedChargeFallbackBenefit
+		return dec, nil
 	}
 
 	fallbackDecision := c.evaluateFallback(ctx, now, currentStatus, currentPrice, settings, simData, summary, lastAction)
@@ -547,8 +571,10 @@ func (c *Controller) evaluateDeficit(
 	summary simulationSummary,
 	lastAction *types.Action,
 ) *StrategyEvaluation {
-	bufferedHitCapacityAt := summary.HitBufferedCapacityAt
 	bufferedHitFutureCapacityAt := summary.HitBufferedFutureCapacityAt
+	if bufferedHitFutureCapacityAt.IsZero() && !summary.HitBufferedCapacityAt.IsZero() && summary.HitBufferedCapacityAt.After(now) {
+		bufferedHitFutureCapacityAt = summary.HitBufferedCapacityAt
+	}
 	chargeKW := currentStatus.MaxBatteryChargeKW
 	if chargeKW <= 0 {
 		chargeKW = currentStatus.BatteryCapacityKWH / 3.0
@@ -627,7 +653,7 @@ func (c *Controller) evaluateDeficit(
 	// the true global average deficit rate of future hours.
 	for _, slot := range simData {
 		// If the battery hits capacity, any subsequent deficits cannot be prevented by charging now.
-		if !bufferedHitCapacityAt.IsZero() && !slot.TS.Before(bufferedHitCapacityAt) {
+		if !bufferedHitFutureCapacityAt.IsZero() && !slot.TS.Before(bufferedHitFutureCapacityAt) {
 			break
 		}
 		// Deficits after the VPP cutoff cannot be prevented by charging now.
@@ -675,7 +701,7 @@ func (c *Controller) evaluateDeficit(
 	lastDeficitKWH = 0.0
 	for i, slot := range simData {
 		var cutoff time.Time
-		if !bufferedHitCapacityAt.IsZero() && !slot.TS.Before(bufferedHitCapacityAt) {
+		if !bufferedHitFutureCapacityAt.IsZero() && !slot.TS.Before(bufferedHitFutureCapacityAt) {
 			break
 		}
 		if !vppCutoff.IsZero() && !slot.TS.Before(vppCutoff) {
@@ -719,7 +745,7 @@ func (c *Controller) evaluateDeficit(
 						continue
 					}
 					// Ensure we're on the same side of capacity
-					if !bufferedHitCapacityAt.IsZero() && slot.TS.After(bufferedHitCapacityAt) && !candidateTS.After(bufferedHitCapacityAt) {
+					if !bufferedHitFutureCapacityAt.IsZero() && slot.TS.After(bufferedHitFutureCapacityAt) && !candidateTS.After(bufferedHitFutureCapacityAt) {
 						continue
 					}
 					var cost float64
@@ -858,7 +884,7 @@ func (c *Controller) evaluateDeficit(
 						if !cutoff.IsZero() && candidateTS.After(cutoff) {
 							break
 						}
-						if !bufferedHitCapacityAt.IsZero() && slot.TS.After(bufferedHitCapacityAt) && !candidateTS.After(bufferedHitCapacityAt) {
+						if !bufferedHitFutureCapacityAt.IsZero() && slot.TS.After(bufferedHitFutureCapacityAt) && !candidateTS.After(bufferedHitFutureCapacityAt) {
 							continue
 						}
 						isExpensive := simData[j].GridChargeDollarsPerKWH > cheapestFutureCost+minDeficitDiff
@@ -1859,7 +1885,7 @@ func (c *Controller) evaluatePlannedCharge(
 	summary simulationSummary,
 	plan PlannedCharge,
 	lastAction *types.Action,
-) *DecisionResult {
+) (*DecisionResult, *DecisionResult) {
 	isAlreadyChargingGrid := lastAction != nil && lastAction.BatteryMode == types.BatteryModeChargeAny
 
 	// We almost ALWAYS use HitThresholdDeficitAt. However, if we are already charging or standby holding a deficit,
@@ -1953,7 +1979,7 @@ func (c *Controller) evaluatePlannedCharge(
 			Reason:      reason,
 			Description: standbyDescription,
 			FuturePrice: futurePrice,
-		}
+		}, nil
 	}
 
 	// Otherwise, we can safely discharge the battery now to cover the home load.
@@ -1965,7 +1991,7 @@ func (c *Controller) evaluatePlannedCharge(
 	if hitDeficitAt.IsZero() || !hitDeficitAt.Before(plan.Time.Add(-time.Second)) {
 		// c. We have enough battery to last until the planned charge time
 		loadDescription := fmt.Sprintf("Sufficient battery to reach planned charge time at %s.", plan.Time.Format(time.Kitchen))
-		return &DecisionResult{
+		return nil, &DecisionResult{
 			BatteryMode: types.BatteryModeLoad,
 			Reason:      types.ActionReasonSufficientBatteryTillCharge,
 			Description: loadDescription,
@@ -1990,7 +2016,7 @@ func (c *Controller) evaluatePlannedCharge(
 			BatteryMode: types.BatteryModeLoad,
 			Reason:      types.ActionReasonBatteryAtReserve,
 			Description: "Battery is at reserve. Using remaining energy because standby is not meaningful (battery is already held at reserve).",
-		}
+		}, nil
 	}
 
 	loadDescription := fmt.Sprintf(
@@ -1999,7 +2025,7 @@ func (c *Controller) evaluatePlannedCharge(
 		gridChargeNowCost,
 		plan.Cost,
 	)
-	return &DecisionResult{
+	return nil, &DecisionResult{
 		BatteryMode: types.BatteryModeLoad,
 		Reason:      types.ActionReasonDischargeAtPeak,
 		Description: loadDescription,
@@ -2242,11 +2268,14 @@ func (c *Controller) evaluateFallback(
 		if refillDeficitAt.IsZero() {
 			refillDeficitAt = summary.HitBufferedDeficitAt
 		}
-		capacityHitAt := summary.HitThresholdCapacityAt
+		capacityHitAt := summary.HitThresholdFutureCapacityAt
 		if isAlreadyActive {
-			capacityHitAt = summary.HitBufferedCapacityAt
+			capacityHitAt = summary.HitBufferedFutureCapacityAt
 		}
 		if capacityHitAt.IsZero() {
+			capacityHitAt = summary.HitFutureCapacityAt
+		}
+		if capacityHitAt.IsZero() && !summary.HitCapacityAt.IsZero() && summary.HitCapacityAt.After(now) {
 			capacityHitAt = summary.HitCapacityAt
 		}
 		if !capacityHitAt.IsZero() && capacityHitAt.Before(refillDeficitAt) {
@@ -2469,7 +2498,11 @@ func (c *Controller) getConsecutiveCheapDuration(
 	// Scan future slots (index 1 onwards) as long as they are cheap (below or equal to threshold)
 	for j := 1; j < len(simData); j++ {
 		if simData[j].GridChargeDollarsPerKWH <= threshold {
-			totalDur += 1.0
+			dur := simData[j].EnergyApplyRatio
+			if dur <= 0.0 {
+				dur = 1.0
+			}
+			totalDur += dur
 		} else {
 			break
 		}
@@ -2573,6 +2606,8 @@ func (c *Controller) simulateStandby(
 				}
 			}
 			hitDeficitAt = time.Time{}
+			bufferedHitDeficitAt = time.Time{}
+			thresholdHitDeficitAt = time.Time{}
 		}
 
 		if appliedNetKWH > 0 {

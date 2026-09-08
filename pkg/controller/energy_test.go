@@ -2117,3 +2117,56 @@ func TestIdentifyHistoricalVacationDays(t *testing.T) {
 		assert.False(t, vacationDays[day10Str], "day 10 (volatile 1.2 kWh avg with spikes) must NOT be detected as vacation")
 	})
 }
+
+func TestGetWeightedPercentile(t *testing.T) {
+	t.Run("Empty slice returns zero", func(t *testing.T) {
+		res := getWeightedPercentile(nil, 0.5)
+		assert.Equal(t, 0.0, res)
+	})
+
+	t.Run("Single point returns its value", func(t *testing.T) {
+		pts := []weightedPoint{{Value: 42.0, Weight: 1.0}}
+		res := getWeightedPercentile(pts, 0.5)
+		assert.Equal(t, 42.0, res)
+	})
+
+	t.Run("Clamps below lowest midpoint", func(t *testing.T) {
+		pts := []weightedPoint{
+			{Value: 10.0, Weight: 1.0},
+			{Value: 20.0, Weight: 1.0},
+		}
+		res := getWeightedPercentile(pts, 0.0)
+		assert.Equal(t, 10.0, res)
+	})
+
+	t.Run("Clamps above highest midpoint", func(t *testing.T) {
+		pts := []weightedPoint{
+			{Value: 10.0, Weight: 1.0},
+			{Value: 20.0, Weight: 1.0},
+		}
+		res := getWeightedPercentile(pts, 1.0)
+		assert.Equal(t, 20.0, res)
+	})
+
+	t.Run("Interpolates linearly between midpoints", func(t *testing.T) {
+		pts := []weightedPoint{
+			{Value: 10.0, Weight: 1.0},
+			{Value: 20.0, Weight: 1.0},
+		}
+		// pList[0] = 0.25, pList[1] = 0.75. At percentile = 0.5, ratio = 0.5 -> 15.0
+		res := getWeightedPercentile(pts, 0.5)
+		assert.InDelta(t, 15.0, res, 1e-6)
+	})
+
+	t.Run("Prevents division by zero and NaN when midpoints are identical", func(t *testing.T) {
+		pts := []weightedPoint{
+			{Value: 10.0, Weight: 1.0},
+			{Value: 20.0, Weight: 0.0},
+			{Value: 30.0, Weight: 1.0},
+		}
+		// Midpoints between pt[0] and pt[1] might be close or identical when weight is 0
+		res := getWeightedPercentile(pts, 0.5)
+		assert.False(t, math.IsNaN(res), "result should not be NaN")
+		assert.False(t, math.IsInf(res, 0), "result should not be infinite")
+	})
+}

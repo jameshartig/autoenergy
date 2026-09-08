@@ -880,7 +880,11 @@ func getWeightedPercentile(points []weightedPoint, percentile float64) float64 {
 	// Linearly interpolate between the two matching points in the interval
 	for k := 0; k < n-1; k++ {
 		if pList[k] <= percentile && percentile <= pList[k+1] {
-			ratio := (percentile - pList[k]) / (pList[k+1] - pList[k])
+			diff := pList[k+1] - pList[k]
+			if diff <= 1e-9 {
+				return points[k].Value
+			}
+			ratio := (percentile - pList[k]) / diff
 			return points[k].Value + ratio*(points[k+1].Value-points[k].Value)
 		}
 	}
