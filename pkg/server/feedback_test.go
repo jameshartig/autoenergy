@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/raterudder/raterudder/pkg/storage"
 	"github.com/raterudder/raterudder/pkg/storage/storagemock"
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -18,38 +19,236 @@ import (
 )
 
 func TestHandleSubmitFeedback(t *testing.T) {
-	mockDB := new(storagemock.MockDatabase)
-	server := &Server{
-		storage: mockDB,
-	}
+	t.Run("Basic", func(t *testing.T) {
+		mockDB := new(storagemock.MockDatabase)
+		server := &Server{
+			storage: mockDB,
+		}
 
-	payload := map[string]any{
-		"sentiment": "happy",
-		"comment":   "Great app!",
-		"extra": map[string]string{
-			"userAgent": "test-agent",
-		},
-	}
-	body, _ := json.Marshal(payload)
+		payload := map[string]any{
+			"sentiment": "happy",
+			"comment":   "Great app!",
+			"extra": map[string]string{
+				"userAgent": "test-agent",
+			},
+		}
+		body, _ := json.Marshal(payload)
 
-	req, _ := http.NewRequest("POST", "/api/feedback", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("POST", "/api/feedback", bytes.NewBuffer(body))
 
-	// Set up context
-	ctx := req.Context()
-	ctx = context.WithValue(ctx, userContextKey, types.User{ID: "user123"})
-	ctx = context.WithValue(ctx, siteIDContextKey, "site123")
-	req = req.WithContext(ctx)
+		// Set up context
+		ctx := req.Context()
+		ctx = context.WithValue(ctx, userContextKey, types.User{ID: "user123"})
+		ctx = context.WithValue(ctx, siteIDContextKey, "site123")
+		req = req.WithContext(ctx)
 
-	mockDB.On("InsertFeedback", mock.Anything, mock.MatchedBy(func(f types.Feedback) bool {
-		return f.SiteID == "site123" && f.Sentiment == "happy" && f.Comment == "Great app!" && f.UserID == "user123" && f.Extra["userAgent"] == "test-agent"
-	})).Return(nil)
+		mockDB.On("InsertFeedback", mock.Anything, mock.MatchedBy(func(f types.Feedback) bool {
+			return f.SiteID == "site123" && f.Sentiment == "happy" && f.Comment == "Great app!" && f.UserID == "user123" && f.Extra["userAgent"] == "test-agent"
+		})).Return(nil)
 
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(server.handleSubmitFeedback)
-	handler.ServeHTTP(rr, req)
+		rr := httptest.NewRecorder()
+		handler := http.HandlerFunc(server.handleSubmitFeedback)
+		handler.ServeHTTP(rr, req)
 
-	assert.Equal(t, http.StatusCreated, rr.Code)
-	mockDB.AssertExpectations(t)
+		assert.Equal(t, http.StatusCreated, rr.Code)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("UserWithoutSitesThroughAuthMiddleware", func(t *testing.T) {
+		srv, priv := setupOIDCTest(t)
+		defer srv.Close()
+		provider, err := oidc.NewProvider(context.Background(), srv.URL)
+		require.NoError(t, err)
+
+		validToken := generateTestToken(t, srv.URL, priv, "user@example.com", "user1")
+
+		mockDB := new(storagemock.MockDatabase)
+		server := &Server{
+			storage: mockDB,
+			oidcAudiences: map[string]string{
+				"google": "test-audience",
+			},
+			oidcVerifiers: map[string]tokenVerifier{
+				"google": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+			},
+		}
+
+		// User exists in storage, but has 0 sites
+		mockDB.On("GetUser", mock.Anything, "google:user1").Return(types.User{
+			ID:    "google:user1",
+			Email: "user@example.com",
+			Sites: []types.UserSite{},
+		}, nil).Once()
+
+		mockDB.On("InsertFeedback", mock.Anything, mock.MatchedBy(func(f types.Feedback) bool {
+			return f.SiteID == "" && f.Sentiment == "happy" && f.Comment == "No sites yet!" && f.UserID == "google:user1"
+		})).Return(nil).Once()
+
+		payload := map[string]any{
+			"sentiment": "happy",
+			"comment":   "No sites yet!",
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest("POST", "/api/feedback", bytes.NewBuffer(body))
+		req.AddCookie(&http.Cookie{Name: authTokenCookie, Value: validToken})
+
+		rr := httptest.NewRecorder()
+		handler := server.authMiddleware(http.HandlerFunc(server.handleSubmitFeedback))
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusCreated, rr.Code)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("NewUserNotRegisteredThroughAuthMiddleware", func(t *testing.T) {
+		srv, priv := setupOIDCTest(t)
+		defer srv.Close()
+		provider, err := oidc.NewProvider(context.Background(), srv.URL)
+		require.NoError(t, err)
+
+		validToken := generateTestToken(t, srv.URL, priv, "newuser@example.com", "newuser1")
+
+		mockDB := new(storagemock.MockDatabase)
+		server := &Server{
+			storage: mockDB,
+			oidcAudiences: map[string]string{
+				"google": "test-audience",
+			},
+			oidcVerifiers: map[string]tokenVerifier{
+				"google": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+			},
+		}
+
+		// User does not exist in storage yet
+		mockDB.On("GetUser", mock.Anything, "google:newuser1").Return(types.User{}, storage.ErrUserNotFound).Once()
+
+		mockDB.On("InsertFeedback", mock.Anything, mock.MatchedBy(func(f types.Feedback) bool {
+			return f.SiteID == "" && f.Sentiment == "neutral" && f.Comment == "Brand new user" && f.UserID == "google:newuser1"
+		})).Return(nil).Once()
+
+		payload := map[string]any{
+			"sentiment": "neutral",
+			"comment":   "Brand new user",
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest("POST", "/api/feedback", bytes.NewBuffer(body))
+		req.AddCookie(&http.Cookie{Name: authTokenCookie, Value: validToken})
+
+		rr := httptest.NewRecorder()
+		handler := server.authMiddleware(http.HandlerFunc(server.handleSubmitFeedback))
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusCreated, rr.Code)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("AuthorizedSiteThroughAuthMiddleware", func(t *testing.T) {
+		srv, priv := setupOIDCTest(t)
+		defer srv.Close()
+		provider, err := oidc.NewProvider(context.Background(), srv.URL)
+		require.NoError(t, err)
+
+		validToken := generateTestToken(t, srv.URL, priv, "user@example.com", "user1")
+
+		mockDB := new(storagemock.MockDatabase)
+		server := &Server{
+			storage: mockDB,
+			oidcAudiences: map[string]string{
+				"google": "test-audience",
+			},
+			oidcVerifiers: map[string]tokenVerifier{
+				"google": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+			},
+		}
+
+		mockDB.On("GetUser", mock.Anything, "google:user1").Return(types.User{
+			ID:    "google:user1",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site123"}},
+		}, nil).Once()
+
+		mockDB.On("GetSite", mock.Anything, "site123").Return(types.Site{
+			ID: "site123",
+			Permissions: []types.SitePermissions{
+				{UserID: "google:user1"},
+			},
+		}, nil).Once()
+
+		mockDB.On("InsertFeedback", mock.Anything, mock.MatchedBy(func(f types.Feedback) bool {
+			return f.SiteID == "site123" && f.Sentiment == "happy" && f.Comment == "Authorized site" && f.UserID == "google:user1"
+		})).Return(nil).Once()
+
+		payload := map[string]any{
+			"siteID":    "site123",
+			"sentiment": "happy",
+			"comment":   "Authorized site",
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest("POST", "/api/feedback", bytes.NewBuffer(body))
+		req.AddCookie(&http.Cookie{Name: authTokenCookie, Value: validToken})
+
+		rr := httptest.NewRecorder()
+		handler := server.authMiddleware(http.HandlerFunc(server.handleSubmitFeedback))
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusCreated, rr.Code)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("UnauthorizedSiteThroughAuthMiddleware", func(t *testing.T) {
+		srv, priv := setupOIDCTest(t)
+		defer srv.Close()
+		provider, err := oidc.NewProvider(context.Background(), srv.URL)
+		require.NoError(t, err)
+
+		validToken := generateTestToken(t, srv.URL, priv, "user@example.com", "user1")
+
+		mockDB := new(storagemock.MockDatabase)
+		server := &Server{
+			storage: mockDB,
+			oidcAudiences: map[string]string{
+				"google": "test-audience",
+			},
+			oidcVerifiers: map[string]tokenVerifier{
+				"google": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+			},
+		}
+
+		mockDB.On("GetUser", mock.Anything, "google:user1").Return(types.User{
+			ID:    "google:user1",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site123"}},
+		}, nil).Once()
+
+		// Site exists, but user lacks permission
+		mockDB.On("GetSite", mock.Anything, "forbiddenSite").Return(types.Site{
+			ID: "forbiddenSite",
+			Permissions: []types.SitePermissions{
+				{UserID: "other-user"},
+			},
+		}, nil).Once()
+
+		payload := map[string]any{
+			"siteID":    "forbiddenSite",
+			"sentiment": "sad",
+			"comment":   "I do not own this site",
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest("POST", "/api/feedback", bytes.NewBuffer(body))
+		req.AddCookie(&http.Cookie{Name: authTokenCookie, Value: validToken})
+
+		rr := httptest.NewRecorder()
+		handler := server.authMiddleware(http.HandlerFunc(server.handleSubmitFeedback))
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		mockDB.AssertNotCalled(t, "InsertFeedback")
+		mockDB.AssertExpectations(t)
+	})
 }
 
 func TestHandleListFeedback(t *testing.T) {

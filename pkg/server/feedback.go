@@ -15,6 +15,11 @@ import (
 func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := s.getUser(r)
+	if user.ID == "" {
+		if u, ok := ctx.Value(userToRegisterContextKey).(types.User); ok {
+			user = u
+		}
+	}
 
 	// Since feedback can be submitted by any logged in user, we just need to ensure they have an ID
 	if user.ID == "" {
@@ -23,9 +28,13 @@ func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	siteID := s.getSiteID(r)
+	var siteID string
+	if val, ok := ctx.Value(siteIDContextKey).(string); ok {
+		siteID = val
+	}
 
 	var req struct {
+		SiteID    string            `json:"siteID"`
 		Sentiment string            `json:"sentiment"`
 		Comment   string            `json:"comment"`
 		Extra     map[string]string `json:"extra"`
@@ -38,7 +47,12 @@ func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	feedbackID := fmt.Sprintf("%s_%s", now.Format(time.RFC3339Nano), siteID)
+	var feedbackID string
+	if siteID != "" {
+		feedbackID = fmt.Sprintf("%s_%s", now.Format(time.RFC3339Nano), siteID)
+	} else {
+		feedbackID = fmt.Sprintf("%s_%s", now.Format(time.RFC3339Nano), user.ID)
+	}
 
 	feedback := types.Feedback{
 		ID:        feedbackID,

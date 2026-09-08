@@ -24,6 +24,7 @@ type pathAttributes struct {
 	ignoreUserNotFound bool
 	isUpdatePath       bool
 	ignoreSiteID       bool
+	optionalSiteID     bool
 	allowAllSites      bool
 }
 
@@ -36,6 +37,7 @@ var routeAuthAttributes = map[string]pathAttributes{
 	"/api/update":                       {isUpdatePath: true},
 	"/api/updateSites":                  {isUpdatePath: true, ignoreSiteID: true},
 	"/api/list/sites":                   {ignoreSiteID: true},
+	"/api/feedback":                     {ignoreUserNotFound: true, optionalSiteID: true},
 	"/api/list/feedback":                {ignoreSiteID: true},
 	"/api/list/interest":                {ignoreSiteID: true},
 	"/api/tesla/register":               {ignoreSiteID: true},
@@ -71,6 +73,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		ignoreUserNotFound := attrs.ignoreUserNotFound
 		isUpdatePath := attrs.isUpdatePath
 		ignoreSiteID := attrs.ignoreSiteID
+		optionalSiteID := attrs.optionalSiteID
 		allowAllSites := attrs.allowAllSites
 
 		// extract SiteID
@@ -259,7 +262,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						}
 
 						// fill in default siteID if the user only has 1 site
-						if siteID == "" && len(user.Sites) == 1 {
+						if siteID == "" && len(user.Sites) == 1 && !optionalSiteID {
 							siteID = user.Sites[0].ID
 						}
 					}
@@ -309,7 +312,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if siteID == "" {
 			if s.singleSite {
 				siteID = types.SiteIDNone
-			} else if !ignoreSiteID {
+			} else if !ignoreSiteID && !optionalSiteID {
 				log.Ctx(ctx).WarnContext(ctx, "siteID required", slog.String("userID", userID))
 				writeJSONError(w, "siteID required", http.StatusBadRequest)
 				return
