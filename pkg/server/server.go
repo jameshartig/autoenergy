@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,6 +85,11 @@ type Server struct {
 	sensitiveRateLimit rate.Limit
 	sensitiveBurst     int
 	nowFunc            func() time.Time
+
+	vapidKey        *ecdsa.PrivateKey
+	vapidPublicKey  string
+	vapidSubject    string
+	gridOutageDelay time.Duration
 }
 
 // Configured initializes the Server with dependencies.
@@ -126,11 +132,29 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	webCacheDuration := lflag.Duration("web-cache-duration", 0, "Duration to cache web files (e.g. 1h, 5m). 0 means no cache.")
 	generalRateLimitPerMin := lflag.Int("general-rate-limit", 30, "General rate limit per minute per IP")
 	sensitiveRateLimitPerMin := lflag.Int("sensitive-rate-limit", 5, "Sensitive rate limit per minute per IP")
+	vapidPrivateKey := lflag.String("vapid-private-key", "", "Base64 ECDSA P-256 private key for Web Push")
+	vapidSubject := lflag.String("vapid-subject", "", "VAPID subject (mailto: or https://)")
 
 	lflag.Do(func() {
 		srv.listenAddr = *listenAddr
 		srv.devProxy = *devProxy
 		srv.updateSpecificEmail = *updateSpecificEmail
+		if *vapidPrivateKey != "" {
+			priv, pub, err := parseVAPIDPrivateKey(*vapidPrivateKey)
+			if err != nil {
+				log.Ctx(context.Background()).Error("failed to parse vapid-private-key", slog.Any("error", err))
+				os.Exit(1)
+			}
+			srv.vapidKey = priv
+			srv.vapidPublicKey = pub
+			if *vapidSubject == "" {
+				log.Ctx(context.Background()).Error("--vapid-subject is required when using --vapid-private-key")
+				os.Exit(1)
+			}
+			srv.vapidSubject = *vapidSubject
+		} else {
+			log.Ctx(context.Background()).Info("notifications disabled: -vapid-private-key not configured")
+		}
 		if *adminEmails != "" {
 			srv.adminEmails = strings.Split(*adminEmails, ",")
 			for i, email := range srv.adminEmails {
@@ -256,6 +280,12 @@ func (s *Server) setupHandler() http.Handler {
 	apiMux.HandleFunc("GET /api/list/interest", s.handleListInterest)
 	apiMux.HandleFunc("POST /api/report/browser", s.handleReportBrowser)
 	apiMux.HandleFunc("GET /api/tesla/register", s.handleTeslaRegister)
+	apiMux.HandleFunc("GET /api/notifications/vapidPublicKey", s.handleGetVAPIDPublicKey)
+	apiMux.HandleFunc("POST /api/notifications/subscribe", s.handleSubscribe)
+	apiMux.HandleFunc("POST /api/notifications/unsubscribe", s.handleUnsubscribe)
+	apiMux.HandleFunc("GET /api/notifications/settings", s.handleGetNotificationSettings)
+	apiMux.HandleFunc("POST /api/notifications/settings", s.handleUpdateNotificationSettings)
+	apiMux.HandleFunc("POST /api/notifications/click", s.handleNotificationClick)
 
 	mux := http.NewServeMux()
 	// limit request body to 1MB to prevent DoS
@@ -325,7 +355,7 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler:           s.setupHandler(),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,   // Prevent slowloris attacks
-		WriteTimeout:      300 * time.Second, // Some requests like handleSitesUpdate take a while
+		WriteTimeout:      600 * time.Second, // Some requests like handleSitesUpdate take a while
 		IdleTimeout:       15 * time.Second,
 	}
 

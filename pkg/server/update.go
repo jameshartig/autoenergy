@@ -202,6 +202,9 @@ func (s *Server) performSiteUpdate(
 	settings settingsWithVersion,
 	creds types.Credentials,
 ) (*types.Action, string, error) {
+	notifData := &dataForNotifications{
+		settings: settings.Settings,
+	}
 
 	// get ESS System
 	essSystem, err := s.getESSSystem(ctx, siteID, settings, creds)
@@ -209,6 +212,7 @@ func (s *Server) performSiteUpdate(
 		// TODO: how should we alert the user when this fails?
 		return nil, "", fmt.Errorf("failed to get ESS system: %w", err)
 	}
+	notifData.essSystem = essSystem
 
 	// get utility
 	utility, err := s.utilities.Site(ctx, siteID, settings.Settings)
@@ -249,6 +253,7 @@ func (s *Server) performSiteUpdate(
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get price: %w", err)
 	}
+	notifData.currentPrice = currentPrice
 
 	log.Ctx(ctx).DebugContext(ctx, "update: current price fetched", slog.Any("price", currentPrice))
 
@@ -259,6 +264,8 @@ func (s *Server) performSiteUpdate(
 	} else {
 		status = s.mergeUtilityVPPEvents(ctx, status, vppInfo)
 	}
+	notifData.status = status
+	notifData.vppInfo = vppInfo
 
 	// get History for Controller (Last 35 days from monthly summaries + today's/tomorrow's unsummarized data)
 	now := s.now().In(status.Timestamp.Location())
@@ -351,6 +358,8 @@ func (s *Server) performSiteUpdate(
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get combined history", slog.Any("error", err))
 	}
+	notifData.energyHistory = energyHistory
+	notifData.weatherHistory = weatherHistory
 
 	if settings.Pause {
 		log.Ctx(ctx).InfoContext(ctx, "update: paused")
@@ -365,6 +374,7 @@ func (s *Server) performSiteUpdate(
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert paused action", slog.Any("error", err))
 		}
+		// we are purposefully skipping notifications if things are paused
 		return &action, "paused", nil
 	}
 
@@ -382,6 +392,7 @@ func (s *Server) performSiteUpdate(
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
+		s.handleNotifications(ctx, siteID, notifData)
 		return &action, "vpp event", nil
 	}
 
@@ -410,6 +421,7 @@ func (s *Server) performSiteUpdate(
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
+		s.handleNotifications(ctx, siteID, notifData)
 		return nil, "emergency mode", nil
 	}
 
@@ -427,6 +439,8 @@ func (s *Server) performSiteUpdate(
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
+		// don't send notifications is alarms present
+		// TODO: should we send an alarm notification when we detect something is wrong?
 		return nil, "alarms present", nil
 	}
 
@@ -444,6 +458,7 @@ func (s *Server) performSiteUpdate(
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
+		s.handleNotifications(ctx, siteID, notifData)
 		return nil, "grid unavailable", nil
 	}
 
@@ -486,6 +501,7 @@ func (s *Server) performSiteUpdate(
 	if !hasFuture {
 		return nil, "", fmt.Errorf("insufficient future pricing data")
 	}
+	notifData.futurePrices = futurePrices
 
 	latestAction, err := s.storage.GetLatestAction(ctx, siteID)
 	if err != nil {
@@ -546,6 +562,9 @@ func (s *Server) performSiteUpdate(
 	if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 	}
+
+	// evaluate & send notifications (e.g. morning summary, evening summary, anomalies)
+	s.handleNotifications(ctx, siteID, notifData)
 
 	return &action, "", nil
 }

@@ -127,7 +127,7 @@ resource "google_cloud_run_v2_service" "raterudder" {
   template {
     max_instance_request_concurrency = 1000
     service_account                  = google_service_account.raterudder.email
-    timeout                          = "60s"
+    timeout                          = "600s"
 
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"

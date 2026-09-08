@@ -31,6 +31,9 @@ locals {
     "hourly_prices",
     "interest",
     "history_summary",
+    "weather",
+    "notification_logs",
+    "mocks",
   ]
 }
 

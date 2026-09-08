@@ -802,3 +802,121 @@ export const fetchEstimateEVCharging = async (siteID?: string): Promise<EVDetect
     return response.json();
 };
 
+export type MorningSummaryFlavor = 'metrics_heavy' | 'home_planner' | 'executive' | 'pilot';
+export type EveningSummaryFlavor = 'metrics_heavy' | 'home_planner' | 'executive' | 'pilot';
+export type AnomalyAlertSensitivity = '' | 'disabled' | 'low' | 'medium' | 'high';
+
+export interface UserNotificationSettings {
+    morningSummaryEnabled: boolean;
+    morningSummaryHour: number;
+    morningSummaryFlavor: MorningSummaryFlavor;
+    eveningSummaryEnabled?: boolean;
+    eveningSummaryHour?: number;
+    eveningSummaryFlavor?: EveningSummaryFlavor;
+    gridOutageAlert?: boolean;
+    priceSpikeAlert?: AnomalyAlertSensitivity;
+    solarUnderproductionAlert?: AnomalyAlertSensitivity;
+    vppDispatchAlert?: boolean;
+}
+
+export interface PushSubscriptionKeys {
+    p256dh: string;
+    auth: string;
+}
+
+export interface PushSubscription {
+    id?: string;
+    endpoint: string;
+    keys: PushSubscriptionKeys;
+    userAgent?: string;
+    tsCreated?: string;
+}
+
+export interface GetNotificationSettingsResponse {
+    settings: UserNotificationSettings;
+    subscriptions: PushSubscription[];
+    vapidEnabled: boolean;
+}
+
+export interface NotificationLog {
+    id: string;
+    tsCreated: string;
+    userID: string;
+    endpoint: string;
+    type: string;
+    flavor: string;
+    title: string;
+    body: string;
+    success: boolean;
+    statusCode: number;
+    error?: string;
+    clicked?: boolean;
+    tsClicked?: string;
+}
+
+export interface MonthlyNotificationLogs {
+    tsMonthStart: string;
+    logs: NotificationLog[];
+}
+
+export const fetchVAPIDPublicKey = async (): Promise<ArrayBuffer> => {
+    const response = await fetch('/api/notifications/vapidPublicKey');
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to fetch VAPID public key'));
+    }
+    return await response.arrayBuffer();
+};
+
+export const fetchNotificationSettings = async (siteID?: string): Promise<GetNotificationSettingsResponse> => {
+    const query = new URLSearchParams();
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    const response = await fetch(`/api/notifications/settings${queryString}`);
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to fetch notification settings'));
+    }
+    return response.json();
+};
+
+export const subscribePushNotification = async (subscription: PushSubscription, sendTest: boolean = false): Promise<void> => {
+    const response = await fetch('/api/notifications/subscribe', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ subscription, sendTest }),
+    });
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to register push subscription'));
+    }
+};
+
+export const unsubscribePushNotification = async (endpoint: string): Promise<void> => {
+    const response = await fetch('/api/notifications/unsubscribe', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ endpoint }),
+    });
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to remove push subscription'));
+    }
+};
+
+export const updateNotificationSettings = async (siteID: string, settings: UserNotificationSettings): Promise<void> => {
+    const response = await fetch('/api/notifications/settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ siteID, settings }),
+    });
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to update notification settings'));
+    }
+};
+
+

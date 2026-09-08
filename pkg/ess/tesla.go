@@ -1200,7 +1200,7 @@ func (b *Tesla) SetModes(ctx context.Context, bat types.BatteryMode, sol types.S
 			wg.Add(1)
 			go func(ctx context.Context) {
 				defer wg.Done()
-				asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+				asyncCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
 				b.verifyBackupReserve(asyncCtx, bat, newReserveSOC, liveStatus)
 			}(ctx)

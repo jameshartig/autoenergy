@@ -35,6 +35,7 @@
 
 .help-dialog-popup {
   max-width: 480px;
+  z-index: 3100;
 }
 
 .help-dialog-header {

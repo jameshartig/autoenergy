@@ -73,6 +73,14 @@ type Database interface {
 	ListInterest(ctx context.Context, limit int) ([]types.InterestSubmission, error)
 	DeleteInterest(ctx context.Context, email string) error
 
+	// Notifications
+	AddUserPushSubscription(ctx context.Context, userID string, sub types.PushSubscription) error
+	RemoveUserPushSubscription(ctx context.Context, userID string, endpoint string) error
+	UpdateSiteNotificationSettings(ctx context.Context, siteID string, userID string, settings types.UserNotificationSettings) error
+	GetNotificationLogs(ctx context.Context, siteID string, start, end time.Time) ([]types.NotificationLog, error)
+	AppendNotificationLog(ctx context.Context, siteID string, log types.NotificationLog) error
+	RecordNotificationClick(ctx context.Context, siteID string, month string, logID string, clickedAt time.Time) error
+
 	// Lifecycle
 	Ping(ctx context.Context) error
 	Close() error

@@ -329,7 +329,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			updatedWeather = true
 			wg.Go(func() {
 				log.Ctx(ctx).InfoContext(ctx, "fetching initial weather for new location")
-				if err := s.updateWeatherHistory(context.WithoutCancel(ctx), siteID, loc); err != nil {
+				ctx, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+				defer done()
+				if err := s.updateWeatherHistory(ctx, siteID, loc); err != nil {
 					log.Ctx(ctx).ErrorContext(ctx, "failed to sync weather history after settings update", slog.Any("error", err))
 				}
 			})
@@ -482,7 +484,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 				updatedEnergy = true
 				wg.Go(func() {
 					log.Ctx(ctx).InfoContext(ctx, "backfilling energy history for new credentials")
-					if err := s.updateEnergyHistory(context.WithoutCancel(ctx), siteID, essSystem); err != nil {
+					ctx, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+					defer done()
+					if err := s.updateEnergyHistory(ctx, siteID, essSystem); err != nil {
 						log.Ctx(ctx).ErrorContext(ctx, "failed to sync energy history after settings update", slog.Any("error", err))
 					}
 				})
@@ -516,7 +520,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 				slog.String("utilityProvider", newSettings.UtilityProvider),
 				slog.String("utilityRate", newSettings.UtilityRate),
 			)
-			if err := s.updatePriceHistory(context.WithoutCancel(ctx), siteID, u, true); err != nil {
+			ctx, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer done()
+			if err := s.updatePriceHistory(ctx, siteID, u, true); err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "failed to update price history after settings change", slog.Any("error", err))
 			}
 		})
@@ -549,7 +555,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	if updatedWeather || updatedEnergy {
 		log.Ctx(ctx).InfoContext(ctx, "triggering history summary update after settings backfill")
-		if _, err := s.backfillHistorySummaries(context.WithoutCancel(ctx), siteID, s.now()); err != nil {
+		ctx, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer done()
+		if _, err := s.backfillHistorySummaries(ctx, siteID, s.now()); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to backfill history summaries after settings update", slog.Any("error", err))
 		}
 	}

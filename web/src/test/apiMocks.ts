@@ -188,5 +188,21 @@ export const setupDefaultApiMocks = (api: any) => {
             sessionsCount: 11,
         });
     }
+    if (typeof api.fetchNotificationSettings?.mockResolvedValue === 'function') {
+        api.fetchNotificationSettings.mockResolvedValue({
+            settings: {
+                morningSummaryEnabled: false,
+                morningSummaryHour: 7,
+                morningSummaryFlavor: 'home_planner'
+            },
+            subscriptions: [],
+            vapidEnabled: true
+        });
+    }
+    if (typeof api.updateNotificationSettings?.mockResolvedValue === 'function') api.updateNotificationSettings.mockResolvedValue(undefined);
+    if (typeof api.fetchVAPIDPublicKey?.mockResolvedValue === 'function') api.fetchVAPIDPublicKey.mockResolvedValue(new ArrayBuffer(65));
+    if (typeof api.subscribePushNotification?.mockResolvedValue === 'function') api.subscribePushNotification.mockResolvedValue(undefined);
+    if (typeof api.unsubscribePushNotification?.mockResolvedValue === 'function') api.unsubscribePushNotification.mockResolvedValue(undefined);
 };
+
 

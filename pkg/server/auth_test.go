@@ -517,7 +517,7 @@ func TestAuthMiddleware(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
 		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
-		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
+		req := createReq("GET", "/api/history/savings?siteID=ALL", nil, cookie)
 
 		mocks.On("GetUser", mock.Anything, "google:user@example.com").Return(types.User{
 			ID:    "google:user@example.com",
@@ -544,7 +544,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
-		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
+		req := createReq("GET", "/api/history/savings?siteID=ALL", nil, cookie)
 
 		mocks.On("GetUser", mock.Anything, "google:user@example.com").Return(types.User{
 			ID:    "google:user@example.com",
@@ -559,6 +559,30 @@ func TestAuthMiddleware(t *testing.T) {
 		assert.Equal(t, "site1", w.Header().Get("X-All-Site-IDs"))
 		assert.Equal(t, "user@example.com", w.Header().Get("X-Email"))
 		assert.Equal(t, "false", w.Header().Get("X-Admin"))
+		assert.True(t, mocks.AssertExpectations(t))
+	})
+
+	t.Run("Multi Site Mode - Auth and SiteID ALL Disallowed Method", func(t *testing.T) {
+		mocks := new(mockStorage)
+		server.storage = mocks
+		server.singleSite = false
+		w := httptest.NewRecorder()
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
+		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
+
+		mocks.On("GetUser", mock.Anything, "google:user@example.com").Return(types.User{
+			ID:    "google:user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
+		}, nil).Once()
+
+		server.authMiddleware(testHandler).ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Empty(t, w.Header().Get("X-Site-ID"))
+		assert.Empty(t, w.Header().Get("X-All-Site-IDs"))
+		assert.Empty(t, w.Header().Get("X-Email"))
+		assert.Empty(t, w.Header().Get("X-Admin"))
 		assert.True(t, mocks.AssertExpectations(t))
 	})
 

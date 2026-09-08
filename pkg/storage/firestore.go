@@ -690,7 +690,7 @@ func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release strin
 	if release != "" {
 		q = q.Where("release", "==", release)
 	}
-	if updateGroup != nil {
+	if len(updateGroup) > 0 {
 		if release == "" {
 			return nil, nil, errors.New("release cannot be empty when updateGroup is specified")
 		}
@@ -1432,42 +1432,48 @@ func (f *FirestoreProvider) DeleteInterest(ctx context.Context, email string) er
 	return nil
 }
 
-func getOverlappingMonths(start, end time.Time) []string {
-	var months []string
-	t := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location())
-	for t.Before(end) {
-		months = append(months, t.Format("2006-01"))
-		t = t.AddDate(0, 1, 0)
-	}
-	return months
-}
-
 // GetHistorySummaries retrieves the monthly summaries that overlap with a range of dates.
+// We do not discard any dates from the history summaries, even if they fall outside
+// of [start, end)
 func (f *FirestoreProvider) GetHistorySummaries(ctx context.Context, siteID string, start, end time.Time) ([]types.HistorySummary, error) {
+	if !start.Before(end) {
+		return nil, nil
+	}
+
 	coll, err := f.getCollection(siteID, "history_summary")
 	if err != nil {
 		return nil, err
 	}
 
-	months := getOverlappingMonths(start, end)
-	if len(months) == 0 {
-		return nil, nil
+	// Each summary document covers at most one calendar month. Any summary with data overlapping
+	// [start, end) must have earliestDate < end. To avoid scanning all prior history, we bound the
+	// lower end to the 1st of start's month. We only need to include the previous month if start is
+	// within 23 hours of the month start (to account for site timezone offsets relative to UTC).
+	// The alternative is calculating all of the months and then using GetAll but we would pay for
+	// a lookup for each month even if the site has no data. By doing a query that can return nothing
+	// we save Firestore reads.
+	loc := start.Location()
+	monthStart := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, loc)
+	queryStart := monthStart
+	if start.Sub(monthStart) < 23*time.Hour {
+		queryStart = monthStart.AddDate(0, -1, 0)
 	}
 
-	refs := make([]*firestore.DocumentRef, len(months))
-	for i, m := range months {
-		refs[i] = coll.Doc(m)
-	}
-
-	snapshots, err := f.client.GetAll(ctx, refs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to batch get history summaries: %w", err)
-	}
+	iter := coll.
+		Where("earliestDate", ">=", queryStart).
+		Where("earliestDate", "<", end).
+		OrderBy("earliestDate", firestore.Asc).
+		Documents(ctx)
+	defer iter.Stop()
 
 	var summaries []types.HistorySummary
-	for _, doc := range snapshots {
-		if !doc.Exists() {
-			continue
+	for {
+		doc, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error iterating history summaries: %w", err)
 		}
 
 		val, err := doc.DataAt("json")
@@ -1486,6 +1492,10 @@ func (f *FirestoreProvider) GetHistorySummaries(ctx context.Context, siteID stri
 		}
 		summaries = append(summaries, summary)
 	}
+
+	slices.SortFunc(summaries, func(a, b types.HistorySummary) int {
+		return a.TSMonthStart.Compare(b.TSMonthStart)
+	})
 
 	return summaries, nil
 }
@@ -1735,4 +1745,422 @@ func (f *FirestoreProvider) deleteCollection(ctx context.Context, coll *firestor
 		}
 	}
 	return nil
+}
+
+// AddUserPushSubscription adds or updates a push subscription on a user in a transaction.
+func (f *FirestoreProvider) AddUserPushSubscription(ctx context.Context, userID string, sub types.PushSubscription) error {
+	if userID == "" {
+		return fmt.Errorf("userID cannot be empty")
+	}
+	docRef := f.client.Collection("users").Doc(userID)
+
+	return f.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return fmt.Errorf("%w: %s", ErrUserNotFound, userID)
+			}
+			return fmt.Errorf("failed to get user %s: %w", userID, err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			return fmt.Errorf("user %s missing json: %w", userID, err)
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("user %s json is not a string", userID)
+		}
+
+		var user types.User
+		if err := json.Unmarshal([]byte(jsonStr), &user); err != nil {
+			return fmt.Errorf("failed to unmarshal user %s: %w", userID, err)
+		}
+
+		// Update existing subscription or append
+		found := false
+		for i, existing := range user.Subscriptions {
+			if existing.Endpoint == sub.Endpoint || (existing.ID != "" && existing.ID == sub.ID) {
+				user.Subscriptions[i] = sub
+				found = true
+				break
+			}
+		}
+		if !found {
+			user.Subscriptions = append(user.Subscriptions, sub)
+		}
+
+		userJSON, err := json.Marshal(user)
+		if err != nil {
+			return fmt.Errorf("failed to marshal user %s: %w", userID, err)
+		}
+
+		return tx.Set(docRef, map[string]any{
+			"json": string(userJSON),
+		}, firestore.MergeAll)
+	})
+}
+
+// RemoveUserPushSubscription removes a push subscription by endpoint from a user in a transaction.
+// If the user has no remaining push subscriptions after removal, their userID is also cleaned up from
+// site.Notifications across all sites they belong to.
+func (f *FirestoreProvider) RemoveUserPushSubscription(ctx context.Context, userID string, endpoint string) error {
+	if userID == "" {
+		return fmt.Errorf("userID cannot be empty")
+	}
+	docRef := f.client.Collection("users").Doc(userID)
+
+	var userSites []types.UserSite
+	noRemainingSubscriptions := false
+
+	err := f.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return fmt.Errorf("%w: %s", ErrUserNotFound, userID)
+			}
+			return fmt.Errorf("failed to get user %s: %w", userID, err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			return fmt.Errorf("user %s missing json: %w", userID, err)
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("user %s json is not a string", userID)
+		}
+
+		var user types.User
+		if err := json.Unmarshal([]byte(jsonStr), &user); err != nil {
+			return fmt.Errorf("failed to unmarshal user %s: %w", userID, err)
+		}
+
+		filtered := slices.DeleteFunc(user.Subscriptions, func(sub types.PushSubscription) bool {
+			return sub.Endpoint == endpoint || sub.ID == endpoint
+		})
+		user.Subscriptions = filtered
+		if len(filtered) == 0 {
+			noRemainingSubscriptions = true
+			userSites = user.Sites
+		}
+
+		userJSON, err := json.Marshal(user)
+		if err != nil {
+			return fmt.Errorf("failed to marshal user %s: %w", userID, err)
+		}
+
+		return tx.Set(docRef, map[string]any{
+			"json": string(userJSON),
+		}, firestore.MergeAll)
+	})
+	if err != nil {
+		return err
+	}
+
+	if noRemainingSubscriptions && len(userSites) > 0 {
+		for _, s := range userSites {
+			if s.ID != "" {
+				err := f.UpdateSiteNotificationSettings(ctx, s.ID, userID, types.UserNotificationSettings{})
+				if err != nil {
+					log.Ctx(ctx).Error(
+						"failed to cleanup user from site notifications",
+						slog.String("siteID", s.ID),
+						slog.String("userID", userID),
+						slog.Any("error", err),
+					)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// UpdateSiteNotificationSettings updates notification preferences for a specific user on a site in a transaction.
+// If settings is an empty struct (types.UserNotificationSettings{}), the user's notification entry is deleted.
+func (f *FirestoreProvider) UpdateSiteNotificationSettings(ctx context.Context, siteID string, userID string, settings types.UserNotificationSettings) error {
+	if siteID == "" {
+		return fmt.Errorf("siteID cannot be empty")
+	}
+	if userID == "" {
+		return fmt.Errorf("userID cannot be empty")
+	}
+	docRef := f.client.Collection("sites").Doc(siteID)
+
+	return f.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return fmt.Errorf("%w: %s", ErrSiteNotFound, siteID)
+			}
+			return fmt.Errorf("failed to get site %s: %w", siteID, err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			return fmt.Errorf("site %s missing json: %w", siteID, err)
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("site %s json is not a string", siteID)
+		}
+
+		var site types.Site
+		if err := json.Unmarshal([]byte(jsonStr), &site); err != nil {
+			return fmt.Errorf("failed to unmarshal site %s: %w", siteID, err)
+		}
+
+		if settings == (types.UserNotificationSettings{}) {
+			if site.Notifications == nil {
+				return nil
+			}
+			if _, exists := site.Notifications[userID]; !exists {
+				return nil
+			}
+			delete(site.Notifications, userID)
+			if len(site.Notifications) == 0 {
+				site.Notifications = nil
+			}
+		} else {
+			if site.Notifications != nil {
+				if existing, exists := site.Notifications[userID]; exists && existing == settings {
+					return nil
+				}
+			} else {
+				site.Notifications = make(map[string]types.UserNotificationSettings)
+			}
+			site.Notifications[userID] = settings
+		}
+
+		siteJSON, err := json.Marshal(site)
+		if err != nil {
+			return fmt.Errorf("failed to marshal site %s: %w", siteID, err)
+		}
+
+		return tx.Set(docRef, map[string]any{
+			"json": string(siteJSON),
+		}, firestore.MergeAll)
+	})
+}
+
+// GetNotificationLogs retrieves notification logs for a site within the [start, end) time range.
+func (f *FirestoreProvider) GetNotificationLogs(ctx context.Context, siteID string, start, end time.Time) ([]types.NotificationLog, error) {
+	if siteID == "" {
+		return nil, fmt.Errorf("siteID cannot be empty")
+	}
+	coll, err := f.getCollection(siteID, "notification_logs")
+	if err != nil {
+		return nil, err
+	}
+
+	startUTC := start.UTC()
+	endUTC := end.UTC()
+	if startUTC.After(endUTC) {
+		return nil, nil
+	}
+
+	// Notification log documents cover a calendar month and are partitioned strictly in UTC
+	// (document IDs are 'YYYY-MM' in UTC, with earliestDate and latestDate stored in UTC).
+	// Because everything is in UTC, there are no site timezone differences that could cause a log
+	// with TSCreated >= startUTC to reside in a preceding month. Thus, queryStart is simply the 1st
+	// of startUTC's month at 00:00:00 UTC without ever needing to look back to the previous month.
+	queryStart := time.Date(startUTC.Year(), startUTC.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	iter := coll.
+		Where("earliestDate", ">=", queryStart).
+		Where("earliestDate", "<", endUTC).
+		OrderBy("earliestDate", firestore.Asc).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var allLogs []types.NotificationLog
+	for {
+		doc, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error iterating notification logs: %w", err)
+		}
+		val, err := doc.DataAt("json")
+		if err != nil {
+			continue
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			continue
+		}
+		var monthlyLogs types.MonthlyNotificationLogs
+		if err := json.Unmarshal([]byte(jsonStr), &monthlyLogs); err != nil {
+			continue
+		}
+		for _, l := range monthlyLogs.Logs {
+			if !l.TSCreated.Before(startUTC) && l.TSCreated.Before(endUTC) {
+				allLogs = append(allLogs, l)
+			}
+		}
+	}
+
+	slices.SortFunc(allLogs, func(a, b types.NotificationLog) int {
+		return a.TSCreated.Compare(b.TSCreated)
+	})
+
+	return allLogs, nil
+}
+
+// AppendNotificationLog appends a notification log entry to the monthly log document in a transaction.
+func (f *FirestoreProvider) AppendNotificationLog(ctx context.Context, siteID string, logEntry types.NotificationLog) error {
+	if siteID == "" {
+		return fmt.Errorf("siteID cannot be empty")
+	}
+	coll, err := f.getCollection(siteID, "notification_logs")
+	if err != nil {
+		return err
+	}
+
+	ts := logEntry.TSCreated.UTC()
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+		logEntry.TSCreated = ts
+	}
+
+	month := ts.Format("2006-01")
+	monthStart := time.Date(ts.Year(), ts.Month(), 1, 0, 0, 0, 0, time.UTC)
+	docRef := coll.Doc(month)
+
+	return f.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		var monthlyLogs types.MonthlyNotificationLogs
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				monthlyLogs = types.MonthlyNotificationLogs{
+					TSMonthStart: monthStart,
+					Logs:         []types.NotificationLog{},
+				}
+			} else {
+				return fmt.Errorf("failed to get notification logs doc %s: %w", month, err)
+			}
+		} else {
+			val, err := doc.DataAt("json")
+			if err != nil {
+				return fmt.Errorf("notification logs doc missing json: %w", err)
+			}
+			jsonStr, ok := val.(string)
+			if !ok {
+				return fmt.Errorf("notification logs doc json not string")
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &monthlyLogs); err != nil {
+				return fmt.Errorf("failed to unmarshal monthly notification logs: %w", err)
+			}
+		}
+
+		monthlyLogs.Logs = append(monthlyLogs.Logs, logEntry)
+
+		var earliestDate, latestDate time.Time
+		if len(monthlyLogs.Logs) > 0 {
+			earliestDate = monthlyLogs.Logs[0].TSCreated.UTC()
+			latestDate = monthlyLogs.Logs[0].TSCreated.UTC()
+			for _, l := range monthlyLogs.Logs {
+				if l.TSCreated.Before(earliestDate) {
+					earliestDate = l.TSCreated.UTC()
+				}
+				if l.TSCreated.After(latestDate) {
+					latestDate = l.TSCreated.UTC()
+				}
+			}
+		}
+
+		jsonBytes, err := json.Marshal(monthlyLogs)
+		if err != nil {
+			return fmt.Errorf("failed to marshal monthly notification logs: %w", err)
+		}
+
+		data := map[string]any{
+			"json": string(jsonBytes),
+		}
+		if !earliestDate.IsZero() {
+			data["earliestDate"] = earliestDate
+		}
+		if !latestDate.IsZero() {
+			data["latestDate"] = latestDate
+		}
+
+		return tx.Set(docRef, data)
+	})
+}
+
+// RecordNotificationClick marks a notification log entry as clicked in a transaction.
+func (f *FirestoreProvider) RecordNotificationClick(
+	ctx context.Context,
+	siteID string,
+	month string,
+	logID string,
+	clickedAt time.Time,
+) error {
+	if siteID == "" {
+		return fmt.Errorf("siteID cannot be empty")
+	}
+	coll, err := f.getCollection(siteID, "notification_logs")
+	if err != nil {
+		return err
+	}
+
+	ts := clickedAt.UTC()
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+	if month == "" {
+		return fmt.Errorf("month cannot be empty")
+	}
+	docRef := coll.Doc(month)
+
+	return f.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return nil
+			}
+			return fmt.Errorf("failed to get notification logs doc %s: %w", month, err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			return fmt.Errorf("notification logs doc missing json: %w", err)
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("notification logs doc json not string")
+		}
+
+		var monthlyLogs types.MonthlyNotificationLogs
+		if err := json.Unmarshal([]byte(jsonStr), &monthlyLogs); err != nil {
+			return fmt.Errorf("failed to unmarshal monthly notification logs: %w", err)
+		}
+
+		found := false
+		for i, entry := range monthlyLogs.Logs {
+			if entry.ID == logID {
+				if entry.Clicked {
+					return nil
+				}
+				monthlyLogs.Logs[i].Clicked = true
+				monthlyLogs.Logs[i].TSClicked = ts
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
+
+		jsonBytes, err := json.Marshal(monthlyLogs)
+		if err != nil {
+			return fmt.Errorf("failed to marshal monthly notification logs: %w", err)
+		}
+
+		return tx.Set(docRef, map[string]any{
+			"json": string(jsonBytes),
+		}, firestore.MergeAll)
+	})
 }

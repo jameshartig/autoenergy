@@ -104,4 +104,22 @@ describe('Header Component', () => {
         expect(screen.queryByTestId('header-site-name')).not.toBeInTheDocument();
         expect(screen.getByLabelText('Select Site')).toBeInTheDocument();
     });
+
+    it('does not render notification bell by default', () => {
+        renderHeader('/dashboard', true);
+        expect(screen.queryByTestId('header-bell-btn')).not.toBeInTheDocument();
+    });
+
+    it('renders notification bell when ?notifications=true is in the query params', () => {
+        renderHeader('/dashboard?notifications=true', true);
+        expect(screen.getByTestId('header-bell-btn')).toBeInTheDocument();
+    });
+
+    it('opens notification modal when bell button is clicked', async () => {
+        renderHeader('/dashboard?notifications=true', true);
+        const bellBtn = screen.getByTestId('header-bell-btn');
+        fireEvent.click(bellBtn);
+
+        expect(await screen.findByText('Notifications')).toBeInTheDocument();
+    });
 });

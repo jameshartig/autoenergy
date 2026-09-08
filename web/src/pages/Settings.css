@@ -238,7 +238,8 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 1.5rem;
   background: var(--surface-container-low);
-  border: 1px solid var(--outline-variant); /* Increased contrast */
+  border: 1px solid var(--outline-variant);
+  /* Increased contrast */
   border-radius: var(--radius-lg);
   padding: 2rem;
   margin-bottom: 2.5rem;
@@ -255,7 +256,8 @@
 /* Configured Summary Card */
 .configured-summary {
   background: var(--surface-container-low);
-  border: 1px solid var(--outline-variant); /* Increased contrast */
+  border: 1px solid var(--outline-variant);
+  /* Increased contrast */
   border-radius: var(--radius-lg);
   padding: 1.5rem 2rem;
   display: flex;
@@ -266,7 +268,8 @@
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   margin-bottom: 1.5rem;
   width: 100%;
-  text-align: left; /* Ensure content is left-aligned in buttons */
+  text-align: left;
+  /* Ensure content is left-aligned in buttons */
 }
 
 .configured-summary:hover {
@@ -633,6 +636,7 @@
     border-color: rgba(14, 165, 233, 0.4);
     box-shadow: 0 0 10px rgba(14, 165, 233, 0.05);
   }
+
   100% {
     border-color: rgba(14, 165, 233, 0.8);
     box-shadow: 0 0 20px rgba(14, 165, 233, 0.15);
@@ -743,6 +747,3 @@
 .switch-group.disabled .switch-root {
   pointer-events: none;
 }
-
-
-

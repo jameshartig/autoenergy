@@ -748,14 +748,14 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 					slog.Any("err1", err1),
 					slog.Any("err2", err2),
 				)
-			} else if startTime.After(time.Now()) {
+			} else if endTime.After(time.Now()) {
 				ehEvents, ehErr := f.queryEHEvents(ctx)
 				if ehErr != nil {
 					log.Ctx(ctx).WarnContext(ctx, "failed to query EH events", slog.Any("error", ehErr))
 				}
 
 				seenEvents := map[string]bool{}
-				// 1. Process all upcoming events from queryEHEvents
+				// 1. Process all upcoming and ongoing events from queryEHEvents
 				for _, ev := range ehEvents {
 					if ev.EventID == "" {
 						continue
@@ -771,8 +771,8 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 						)
 						continue
 					}
-					// Only keep future/upcoming events
-					if st.After(time.Now()) {
+					// Keep future and ongoing events
+					if et.After(time.Now()) {
 						vppEvents = append(vppEvents, types.VPPEvent{
 							Description: pd.ProgramName,
 							TSStart:     st,

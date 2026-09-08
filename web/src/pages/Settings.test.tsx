@@ -252,7 +252,7 @@ describe('App & Settings', () => {
 
         // Find strategy select trigger by label
         const strategySelect = await screen.findByRole('combobox', { name: /Home Load Prediction Strategy/i });
-        
+
         // Caution message should not be visible initially
         expect(screen.queryByTestId('conservative-strategy-warning')).not.toBeInTheDocument();
 
@@ -1101,7 +1101,7 @@ describe('App & Settings', () => {
         expect(bufferSelect).toHaveTextContent('Default');
 
         fireEvent.change(minStartInput, { target: { value: '10' } });
-        
+
         await user.click(bufferSelect);
         const aggressiveOption = await screen.findByRole('option', { name: 'Tiny' });
         await user.click(aggressiveOption);
@@ -1980,7 +1980,7 @@ describe('App & Settings', () => {
             await waitFor(() => {
                 const deleteAccountSwitch = screen.getByRole('switch', { name: /Delete Account/i });
                 expect(deleteAccountSwitch).toHaveAttribute('aria-disabled', 'true');
-                
+
                 const switchRow = deleteAccountSwitch.closest('.switch-row');
                 expect(switchRow).toHaveAttribute('title', 'All sites must be deleted first');
             });
@@ -2087,7 +2087,7 @@ describe('App & Settings', () => {
             await user.click(nextBtn);
 
             expect(screen.getByText('Manual Charging 💡')).toBeInTheDocument();
-            
+
             const gotItBtn = screen.getByRole('button', { name: /Got It/i });
             await user.click(gotItBtn);
 
@@ -2698,6 +2698,3 @@ describe('App & Settings', () => {
         });
     });
 });
-
-
-

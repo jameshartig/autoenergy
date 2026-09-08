@@ -1,6 +1,7 @@
 import React from 'react';
-import { Link, useLocation } from 'wouter';
+import { Link, useLocation, useSearchParams } from 'wouter';
 import { Select } from '@base-ui/react/select';
+import { NotificationModal } from './NotificationModal';
 import './Header.css';
 import type { UserSite } from '../api';
 
@@ -14,7 +15,15 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ loggedIn, sites, selectedSiteID, onSiteChange, onLogout }) => {
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+    const [isNotificationModalOpen, setIsNotificationModalOpen] = React.useState(false);
     const [location] = useLocation();
+    const [searchParams] = useSearchParams();
+
+    const showNotifications = searchParams.get('notifications') === 'true';
+
+    const currentSite = sites.find(s => s.id === selectedSiteID) || (sites.length > 0 ? sites[0] : undefined);
+    const activeSiteID = currentSite?.id;
+    const activeSiteName = currentSite?.name || currentSite?.id;
 
     const toggleMenu = () => {
         setIsMenuOpen(!isMenuOpen);
@@ -100,7 +109,27 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, sites, selectedSiteID, onSite
 
                     <div className="header-right">
                         {loggedIn ? (
-                            <button onClick={() => { onLogout(); setIsMenuOpen(false); }} className="logout-link">Log Out</button>
+                            <>
+                                {showNotifications && (
+                                    <button
+                                        type="button"
+                                        className="notification-bell-btn"
+                                        onClick={() => {
+                                            setIsNotificationModalOpen(true);
+                                            setIsMenuOpen(false);
+                                        }}
+                                        aria-label="Notification settings"
+                                        data-testid="header-bell-btn"
+                                        title="Notification settings"
+                                    >
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                                        </svg>
+                                    </button>
+                                )}
+                                <button onClick={() => { onLogout(); setIsMenuOpen(false); }} className="logout-link">Log Out</button>
+                            </>
                         ) : (
                             <Link to="/login" className="login-link" onClick={() => setIsMenuOpen(false)}>
                                 <span className="hide-on-mobile">Log In / Sign Up</span>
@@ -110,6 +139,15 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, sites, selectedSiteID, onSite
                     </div>
                 </div>
             </div>
+
+            {loggedIn && showNotifications && (
+                <NotificationModal
+                    open={isNotificationModalOpen}
+                    onClose={() => setIsNotificationModalOpen(false)}
+                    siteID={activeSiteID}
+                    siteName={activeSiteName}
+                />
+            )}
         </header>
     );
 };

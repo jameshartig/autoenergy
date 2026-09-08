@@ -23,6 +23,7 @@ const fastTrackChargeWithin = 15 * time.Minute
 type Decision struct {
 	Action           types.Action
 	SimulationParams types.SimulationParams
+	SimData          []SimHour
 }
 
 // Controller handles the decision-making logic for the ESS.
@@ -158,6 +159,7 @@ func (c *Controller) Decide(
 				SystemStatus:    currentStatus,
 			},
 			SimulationParams: simParams,
+			SimData:          simData,
 		}, nil
 	}
 
@@ -197,6 +199,7 @@ func (c *Controller) Decide(
 				ChargeToSOC:     100,
 			},
 			SimulationParams: simParams,
+			SimData:          simData,
 		}, nil
 	}
 
@@ -229,6 +232,7 @@ func (c *Controller) Decide(
 				ChargeToSOC:           dr.ChargeToSOC,
 			},
 			SimulationParams: simParams,
+			SimData:          simData,
 		}
 	}
 

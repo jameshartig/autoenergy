@@ -948,7 +948,7 @@ button {
 }
 
 .select-positioner {
-  z-index: 1000;
+  z-index: 3000;
 }
 
 .select-popup {

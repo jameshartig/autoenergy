@@ -273,3 +273,36 @@ func (m *MockDatabase) UpdateAdminSettings(ctx context.Context, settings types.A
 	args := m.Called(ctx, settings)
 	return args.Error(0)
 }
+
+func (m *MockDatabase) AddUserPushSubscription(ctx context.Context, userID string, sub types.PushSubscription) error {
+	args := m.Called(ctx, userID, sub)
+	return args.Error(0)
+}
+
+func (m *MockDatabase) RemoveUserPushSubscription(ctx context.Context, userID string, endpoint string) error {
+	args := m.Called(ctx, userID, endpoint)
+	return args.Error(0)
+}
+
+func (m *MockDatabase) UpdateSiteNotificationSettings(ctx context.Context, siteID string, userID string, settings types.UserNotificationSettings) error {
+	args := m.Called(ctx, siteID, userID, settings)
+	return args.Error(0)
+}
+
+func (m *MockDatabase) GetNotificationLogs(ctx context.Context, siteID string, start, end time.Time) ([]types.NotificationLog, error) {
+	args := m.Called(ctx, siteID, start, end)
+	if len(args) > 0 {
+		return args.Get(0).([]types.NotificationLog), args.Error(1)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabase) AppendNotificationLog(ctx context.Context, siteID string, log types.NotificationLog) error {
+	args := m.Called(ctx, siteID, log)
+	return args.Error(0)
+}
+
+func (m *MockDatabase) RecordNotificationClick(ctx context.Context, siteID string, month string, logID string, clickedAt time.Time) error {
+	args := m.Called(ctx, siteID, month, logID, clickedAt)
+	return args.Error(0)
+}

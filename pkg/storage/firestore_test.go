@@ -1043,6 +1043,16 @@ func TestFirestoreProvider(t *testing.T) {
 			assert.Len(t, resSummaries[0].Energy, 2)
 		}
 
+		// Verify that GetHistorySummaries does not truncate dates outside [start, end)
+		// Querying [2026-06-02, 2026-06-03) still returns the full month including 2026-06-01
+		subRangeStart := time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)
+		subRangeEnd := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+		noTruncRes, err := f.GetHistorySummaries(ctx, siteID, subRangeStart, subRangeEnd)
+		require.NoError(t, err)
+		if assert.Len(t, noTruncRes, 1) {
+			assert.Len(t, noTruncRes[0].Energy, 2)
+		}
+
 		// 5. Merge duplicate day (verify it overwrites rather than appends)
 		es1Overwrite := types.DailyEnergyStats{
 			TSDayStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
@@ -1107,6 +1117,12 @@ func TestFirestoreProvider(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, multiRes, 2) // both months returned
 
+		// Query starting more than 23 hours into June excludes previous month (May)
+		midMonthStart := time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)
+		juneOnlyRes, err := f.GetHistorySummaries(ctx, siteID, midMonthStart, end)
+		require.NoError(t, err)
+		assert.Len(t, juneOnlyRes, 1)
+
 		// 8. Assert raw document properties (latestDate, earliestDate fields for querying)
 		coll, err := f.getCollection(siteID, "history_summary")
 		require.NoError(t, err)
@@ -1121,5 +1137,261 @@ func TestFirestoreProvider(t *testing.T) {
 
 		assert.Equal(t, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), rawEarliest.(time.Time).UTC())
 		assert.Equal(t, time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC), rawLatest.(time.Time).UTC())
+	})
+
+	t.Run("UserPushSubscriptions", func(t *testing.T) {
+		siteID := "site-push-cleanup"
+		require.NoError(t, f.CreateSite(ctx, siteID, types.Site{
+			ID: siteID,
+			Notifications: map[string]types.UserNotificationSettings{
+				"push-user@test.com": {
+					MorningSummaryEnabled: true,
+					MorningSummaryHour:    7,
+					MorningSummaryFlavor:  "metrics_heavy",
+				},
+			},
+		}))
+
+		userID := "push-user@test.com"
+		user := types.User{
+			ID:    userID,
+			Email: userID,
+			Sites: []types.UserSite{{ID: siteID, Name: "My Site"}},
+		}
+		require.NoError(t, f.CreateUser(ctx, user))
+
+		sub1 := types.PushSubscription{
+			ID:        "sub-1",
+			Endpoint:  "https://fcm.googleapis.com/fcm/send/sub-1",
+			Keys:      types.PushSubscriptionKeys{P256DH: "key1", Auth: "auth1"},
+			UserAgent: "Chrome Mac",
+			TSCreated: time.Now().UTC(),
+		}
+		require.NoError(t, f.AddUserPushSubscription(ctx, userID, sub1))
+
+		gotUser, err := f.GetUser(ctx, userID)
+		require.NoError(t, err)
+		if assert.Len(t, gotUser.Subscriptions, 1) {
+			assert.Equal(t, "sub-1", gotUser.Subscriptions[0].ID)
+			assert.Equal(t, "https://fcm.googleapis.com/fcm/send/sub-1", gotUser.Subscriptions[0].Endpoint)
+		}
+
+		// Add second subscription
+		sub2 := types.PushSubscription{
+			ID:        "sub-2",
+			Endpoint:  "https://web.push.apple.com/sub-2",
+			Keys:      types.PushSubscriptionKeys{P256DH: "key2", Auth: "auth2"},
+			UserAgent: "Safari iOS",
+			TSCreated: time.Now().UTC(),
+		}
+		require.NoError(t, f.AddUserPushSubscription(ctx, userID, sub2))
+
+		gotUser, err = f.GetUser(ctx, userID)
+		require.NoError(t, err)
+		assert.Len(t, gotUser.Subscriptions, 2)
+
+		// Remove first subscription - user still has sub2, so site notification settings remain
+		require.NoError(t, f.RemoveUserPushSubscription(ctx, userID, sub1.Endpoint))
+		gotUser, err = f.GetUser(ctx, userID)
+		require.NoError(t, err)
+		if assert.Len(t, gotUser.Subscriptions, 1) {
+			assert.Equal(t, "sub-2", gotUser.Subscriptions[0].ID)
+		}
+		gotSite, err := f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		assert.Contains(t, gotSite.Notifications, userID)
+
+		// Remove last subscription - user has 0 subscriptions, so site notification settings should be cleaned up!
+		require.NoError(t, f.RemoveUserPushSubscription(ctx, userID, sub2.Endpoint))
+		gotUser, err = f.GetUser(ctx, userID)
+		require.NoError(t, err)
+		assert.Len(t, gotUser.Subscriptions, 0)
+
+		gotSite, err = f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		assert.NotContains(t, gotSite.Notifications, userID)
+	})
+
+	t.Run("SiteNotificationSettings", func(t *testing.T) {
+		siteID := "site-notif-test"
+		site := types.Site{
+			ID:         siteID,
+			InviteCode: "invite-123",
+		}
+		require.NoError(t, f.CreateSite(ctx, siteID, site))
+
+		user1 := "user1@test.com"
+		settings1 := types.UserNotificationSettings{
+			MorningSummaryEnabled: true,
+			MorningSummaryHour:    7,
+			MorningSummaryFlavor:  "metrics_heavy",
+		}
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, user1, settings1))
+
+		gotSite, err := f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		if assert.NotNil(t, gotSite.Notifications) {
+			assert.Equal(t, settings1, gotSite.Notifications[user1])
+		}
+
+		user2 := "user2@test.com"
+		settings2 := types.UserNotificationSettings{
+			MorningSummaryEnabled: true,
+			MorningSummaryHour:    8,
+			MorningSummaryFlavor:  "home_planner",
+		}
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, user2, settings2))
+
+		gotSite, err = f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		if assert.Len(t, gotSite.Notifications, 2) {
+			assert.Equal(t, settings1, gotSite.Notifications[user1])
+			assert.Equal(t, settings2, gotSite.Notifications[user2])
+		}
+
+		// Update with empty struct deletes user1 from site.Notifications
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, user1, types.UserNotificationSettings{}))
+		gotSite, err = f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		if assert.Len(t, gotSite.Notifications, 1) {
+			assert.NotContains(t, gotSite.Notifications, user1)
+			assert.Equal(t, settings2, gotSite.Notifications[user2])
+		}
+
+		// Setting identical settings is a no-op that succeeds without error
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, user2, settings2))
+
+		// Removing a user ID that was not present is a no-op that succeeds without error
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, "nonexistent@test.com", types.UserNotificationSettings{}))
+		gotSite, err = f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		if assert.Len(t, gotSite.Notifications, 1) {
+			assert.Equal(t, settings2, gotSite.Notifications[user2])
+		}
+
+		// Update user2 with empty struct deletes user2 and leaves Notifications nil/empty
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, user2, types.UserNotificationSettings{}))
+		gotSite, err = f.GetSite(ctx, siteID)
+		require.NoError(t, err)
+		assert.Empty(t, gotSite.Notifications)
+
+		// Removing a user when Notifications is already empty is also a no-op
+		require.NoError(t, f.UpdateSiteNotificationSettings(ctx, siteID, "nonexistent@test.com", types.UserNotificationSettings{}))
+	})
+
+	t.Run("NotificationLogs", func(t *testing.T) {
+		siteID := "site-notif-logs"
+		now := time.Date(2026, 9, 4, 7, 15, 0, 0, time.UTC)
+		log1 := types.NotificationLog{
+			ID:         "log-1",
+			TSCreated:  now,
+			UserID:     "user1@test.com",
+			Endpoint:   "https://fcm.googleapis.com/fcm/send/sub-1",
+			Type:       "morning_summary",
+			Flavor:     "metrics_heavy",
+			Title:      "Morning Summary",
+			Body:       "74% SOC",
+			Success:    true,
+			StatusCode: 201,
+		}
+
+		require.NoError(t, f.AppendNotificationLog(ctx, siteID, log1))
+
+		logs, err := f.GetNotificationLogs(ctx, siteID, now.Add(-1*time.Hour), now.Add(1*time.Hour))
+		require.NoError(t, err)
+		if assert.Len(t, logs, 1) {
+			assert.Equal(t, "log-1", logs[0].ID)
+			assert.False(t, logs[0].Clicked)
+		}
+
+		// Click tracking: first click marks it clicked and sets TSClicked
+		clickTime := now.Add(5 * time.Minute)
+		require.NoError(t, f.RecordNotificationClick(ctx, siteID, "2026-09", "log-1", clickTime))
+
+		logs, err = f.GetNotificationLogs(ctx, siteID, now.Add(-1*time.Hour), now.Add(1*time.Hour))
+		require.NoError(t, err)
+		if assert.Len(t, logs, 1) {
+			assert.True(t, logs[0].Clicked)
+			assert.Equal(t, clickTime, logs[0].TSClicked)
+		}
+
+		// Subsequent click when Clicked is already true is a no-op and preserves original TSClicked
+		laterClickTime := now.Add(15 * time.Minute)
+		require.NoError(t, f.RecordNotificationClick(ctx, siteID, "2026-09", "log-1", laterClickTime))
+
+		logs, err = f.GetNotificationLogs(ctx, siteID, now.Add(-1*time.Hour), now.Add(1*time.Hour))
+		require.NoError(t, err)
+		if assert.Len(t, logs, 1) {
+			assert.True(t, logs[0].Clicked)
+			assert.Equal(t, clickTime, logs[0].TSClicked) // Unchanged
+		}
+
+		// Range query within same month but after latestDate returns empty slice
+		futureDayLogs, err := f.GetNotificationLogs(ctx, siteID, now.AddDate(0, 0, 5), now.AddDate(0, 0, 6))
+		require.NoError(t, err)
+		assert.Empty(t, futureDayLogs)
+
+		// Range query across months with no logs returns empty slice
+		pastLogs, err := f.GetNotificationLogs(ctx, siteID, now.AddDate(-2, 0, 0), now.AddDate(-1, 0, 0))
+		require.NoError(t, err)
+		assert.Empty(t, pastLogs)
+
+		// Range query with inverted start/end returns empty slice
+		invertedLogs, err := f.GetNotificationLogs(ctx, siteID, now.Add(1*time.Hour), now.Add(-1*time.Hour))
+		require.NoError(t, err)
+		assert.Empty(t, invertedLogs)
+
+		// Verify earliestDate and latestDate stored at document root
+		coll, err := f.getCollection(siteID, "notification_logs")
+		require.NoError(t, err)
+		docSnap, err := coll.Doc("2026-09").Get(ctx)
+		require.NoError(t, err)
+		rawEarliest, err := docSnap.DataAt("earliestDate")
+		require.NoError(t, err)
+		rawLatest, err := docSnap.DataAt("latestDate")
+		require.NoError(t, err)
+		assert.Equal(t, now, rawEarliest.(time.Time).UTC())
+		assert.Equal(t, now, rawLatest.(time.Time).UTC())
+
+		// Verify non-UTC inputs are correctly converted to UTC, stored in UTC,
+		// and that GetNotificationLogs truncates logs outside [start, end)
+		cst := time.FixedZone("CDT", -5*3600)
+		log2Time := time.Date(2026, 10, 15, 14, 0, 0, 0, cst) // 19:00 UTC
+		log3Time := time.Date(2026, 10, 15, 16, 0, 0, 0, cst) // 21:00 UTC
+		require.NoError(t, f.AppendNotificationLog(ctx, siteID, types.NotificationLog{
+			ID:        "log-2",
+			TSCreated: log2Time,
+			UserID:    "user2@test.com",
+		}))
+		require.NoError(t, f.AppendNotificationLog(ctx, siteID, types.NotificationLog{
+			ID:        "log-3",
+			TSCreated: log3Time,
+			UserID:    "user3@test.com",
+		}))
+
+		// Query using non-UTC start and end times, verifying truncation of log-2
+		queryStartCST := time.Date(2026, 10, 15, 15, 0, 0, 0, cst) // 20:00 UTC (after log2 at 19:00 UTC)
+		queryEndCST := time.Date(2026, 10, 15, 18, 0, 0, 0, cst)   // 23:00 UTC (after log3 at 21:00 UTC)
+		cstLogs, err := f.GetNotificationLogs(ctx, siteID, queryStartCST, queryEndCST)
+		require.NoError(t, err)
+		if assert.Len(t, cstLogs, 1) {
+			assert.Equal(t, "log-3", cstLogs[0].ID)
+		}
+
+		// Verify that end boundary is exclusive [start, end)
+		// A query ending exactly at log3Time must exclude log-3
+		exclusiveLogs, err := f.GetNotificationLogs(ctx, siteID, queryStartCST, log3Time)
+		require.NoError(t, err)
+		assert.Empty(t, exclusiveLogs)
+
+		// Verify that document root properties for 2026-10 were stored in UTC
+		docSnap10, err := coll.Doc("2026-10").Get(ctx)
+		require.NoError(t, err)
+		rawEarliest10, err := docSnap10.DataAt("earliestDate")
+		require.NoError(t, err)
+		rawLatest10, err := docSnap10.DataAt("latestDate")
+		require.NoError(t, err)
+		assert.Equal(t, log2Time.UTC(), rawEarliest10.(time.Time).UTC())
+		assert.Equal(t, log3Time.UTC(), rawLatest10.(time.Time).UTC())
 	})
 }

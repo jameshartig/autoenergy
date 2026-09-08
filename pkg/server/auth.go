@@ -24,25 +24,32 @@ type pathAttributes struct {
 	ignoreUserNotFound bool
 	isUpdatePath       bool
 	ignoreSiteID       bool
+	allowAllSites      bool
 }
 
 var routeAuthAttributes = map[string]pathAttributes{
-	"/api/auth/login":     {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
-	"/api/auth/status":    {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
-	"/api/auth/logout":    {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
-	"/api/report/browser": {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
-	"/api/join":           {ignoreUserNotFound: true, ignoreSiteID: true},
-	"/api/update":         {isUpdatePath: true},
-	"/api/updateSites":    {isUpdatePath: true, ignoreSiteID: true},
-	"/api/list/sites":     {ignoreSiteID: true},
-	"/api/list/feedback":  {ignoreSiteID: true},
-	"/api/list/interest":  {ignoreSiteID: true},
-	"/api/tesla/register": {ignoreSiteID: true},
-	"/api/interest":       {ignoreUserNotFound: true, ignoreSiteID: true},
-	"/api/list/ess":       {ignoreSiteID: true, ignoreUserNotFound: true},
-	"/api/list/utilities": {ignoreSiteID: true, ignoreUserNotFound: true},
-	"/api/delete/user":    {ignoreSiteID: true},
-	"/api/list/userSites": {ignoreSiteID: true},
+	"/api/auth/login":                   {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/auth/status":                  {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/auth/logout":                  {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/report/browser":               {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/join":                         {ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/update":                       {isUpdatePath: true},
+	"/api/updateSites":                  {isUpdatePath: true, ignoreSiteID: true},
+	"/api/list/sites":                   {ignoreSiteID: true},
+	"/api/list/feedback":                {ignoreSiteID: true},
+	"/api/list/interest":                {ignoreSiteID: true},
+	"/api/tesla/register":               {ignoreSiteID: true},
+	"/api/interest":                     {ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/list/ess":                     {ignoreSiteID: true, ignoreUserNotFound: true},
+	"/api/list/utilities":               {ignoreSiteID: true, ignoreUserNotFound: true},
+	"/api/delete/user":                  {ignoreSiteID: true},
+	"/api/list/userSites":               {ignoreSiteID: true},
+	"/api/notifications/vapidPublicKey": {allowNoLogin: true, ignoreUserNotFound: true, ignoreSiteID: true},
+	"/api/notifications/subscribe":      {ignoreSiteID: true},
+	"/api/notifications/unsubscribe":    {ignoreSiteID: true},
+	"/api/notifications/click":          {allowNoLogin: true, ignoreSiteID: true},
+	"/api/history/savings":              {allowAllSites: true},
+	"/api/history/actionsAndSavings":    {allowAllSites: true},
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
@@ -64,6 +71,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		ignoreUserNotFound := attrs.ignoreUserNotFound
 		isUpdatePath := attrs.isUpdatePath
 		ignoreSiteID := attrs.ignoreSiteID
+		allowAllSites := attrs.allowAllSites
 
 		// extract SiteID
 		var siteID string
@@ -255,6 +263,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							siteID = user.Sites[0].ID
 						}
 					}
+				}
+
+				if siteID == SiteIDAll && !allowAllSites {
+					log.Ctx(ctx).WarnContext(ctx, "all sites not supported", slog.String("siteID", siteID))
+					writeJSONError(w, "all sites not supported", http.StatusForbidden)
+					return
 				}
 
 				isAdmin := s.isMultiSiteAdmin(user)

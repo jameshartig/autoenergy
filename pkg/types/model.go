@@ -12,9 +12,10 @@ const (
 
 // Site represents a household or location that has a battery and solar panels.
 type Site struct {
-	ID          string            `json:"id"`
-	InviteCode  string            `json:"inviteCode"`
-	Permissions []SitePermissions `json:"permissions"`
+	ID            string                              `json:"id"`
+	InviteCode    string                              `json:"inviteCode"`
+	Permissions   []SitePermissions                   `json:"permissions"`
+	Notifications map[string]UserNotificationSettings `json:"notifications,omitempty"`
 }
 
 // SitePermissions represents the permissions for a user on a site.
@@ -30,11 +31,12 @@ type UserSite struct {
 
 // User represents a user of the system.
 type User struct {
-	ID            string     `json:"id"`
-	Email         string     `json:"email"`
-	Sites         []UserSite `json:"sites"`
-	Admin         bool       `json:"-"`
-	SessionSecret string     `json:"sessionSecret,omitempty"`
+	ID            string             `json:"id"`
+	Email         string             `json:"email"`
+	Sites         []UserSite         `json:"sites"`
+	Admin         bool               `json:"-"`
+	SessionSecret string             `json:"sessionSecret,omitempty"`
+	Subscriptions []PushSubscription `json:"subscriptions,omitempty"`
 }
 
 // ActionReason represents the type of action taken by the system.
@@ -302,4 +304,69 @@ type EVDetectionResult struct {
 	SessionsCount      int          `json:"sessionsCount"`
 	Sessions           []EVSession  `json:"sessions,omitempty"`
 	Message            string       `json:"message,omitempty"`
+}
+
+// PushSubscriptionKeys holds the client P256DH and Auth secrets from PushSubscription.toJSON().
+type PushSubscriptionKeys struct {
+	P256DH string `json:"p256dh"`
+	Auth   string `json:"auth"`
+}
+
+// PushSubscription represents a single subscribed browser/device target.
+type PushSubscription struct {
+	ID        string               `json:"id"`
+	Endpoint  string               `json:"endpoint"`
+	Keys      PushSubscriptionKeys `json:"keys"`
+	UserAgent string               `json:"userAgent,omitempty"`
+	TSCreated time.Time            `json:"tsCreated"`
+}
+
+// Notification types sent by the push notification system.
+const (
+	NotificationTypeMorningSummary       = "morning_summary"
+	NotificationTypeEveningSummary       = "evening_summary"
+	NotificationTypeGridOutage           = "grid_outage"
+	NotificationTypeGridRestored         = "grid_restored"
+	NotificationTypePriceSpike           = "price_spike"
+	NotificationTypeSolarUnderproduction = "solar_underproduction"
+	NotificationTypeVPPDispatch          = "vpp_dispatch"
+)
+
+// UserNotificationSettings holds notification preferences for a specific user on a specific site.
+type UserNotificationSettings struct {
+	MorningSummaryEnabled bool   `json:"morningSummaryEnabled"`
+	MorningSummaryHour    int    `json:"morningSummaryHour"`
+	MorningSummaryFlavor  string `json:"morningSummaryFlavor"`
+
+	EveningSummaryEnabled bool   `json:"eveningSummaryEnabled"`
+	EveningSummaryHour    int    `json:"eveningSummaryHour"`
+	EveningSummaryFlavor  string `json:"eveningSummaryFlavor"`
+
+	GridOutageAlert           bool   `json:"gridOutageAlert"`
+	PriceSpikeAlert           string `json:"priceSpikeAlert,omitempty"`           // "", "low", "medium", "high"
+	SolarUnderproductionAlert string `json:"solarUnderproductionAlert,omitempty"` // "", "low", "medium", "high"
+	VPPDispatchAlert          bool   `json:"vppDispatchAlert"`
+}
+
+// NotificationLog records a sent push notification for debugging and click analysis.
+type NotificationLog struct {
+	ID         string    `json:"id"`
+	TSCreated  time.Time `json:"tsCreated"`
+	UserID     string    `json:"userID"`
+	Endpoint   string    `json:"endpoint"`
+	Type       string    `json:"type"`
+	Flavor     string    `json:"flavor"`
+	Title      string    `json:"title"`
+	Body       string    `json:"body"`
+	Success    bool      `json:"success"`
+	StatusCode int       `json:"statusCode"`
+	Error      string    `json:"error,omitempty"`
+	Clicked    bool      `json:"clicked,omitempty"`
+	TSClicked  time.Time `json:"tsClicked,omitempty"`
+}
+
+// MonthlyNotificationLogs groups notifications by month in UTC.
+type MonthlyNotificationLogs struct {
+	TSMonthStart time.Time         `json:"tsMonthStart"`
+	Logs         []NotificationLog `json:"logs"`
 }
