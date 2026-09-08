@@ -201,6 +201,9 @@ func (f *FirestoreProvider) InsertAction(ctx context.Context, siteID string, act
 
 // GetActionHistory retrieves action records within the specified time range.
 func (f *FirestoreProvider) GetActionHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Action, error) {
+	if !start.Before(end) {
+		return nil, nil
+	}
 	coll, err := f.getCollection(siteID, "action_history")
 	if err != nil {
 		return nil, err
@@ -358,6 +361,10 @@ func (f *FirestoreProvider) UpsertEnergyHistories(ctx context.Context, siteID st
 
 	// For multiple items, use BulkWriter
 	bw := f.client.BulkWriter(ctx)
+	var endOnce sync.Once
+	endBW := func() { endOnce.Do(func() { bw.End() }) }
+	defer endBW()
+
 	jobs := make([]*firestore.BulkWriterJob, 0, len(stats))
 
 	for _, s := range stats {
@@ -382,7 +389,7 @@ func (f *FirestoreProvider) UpsertEnergyHistories(ctx context.Context, siteID st
 		jobs = append(jobs, job)
 	}
 
-	bw.End()
+	endBW()
 
 	for _, job := range jobs {
 		if _, err := job.Results(); err != nil {
@@ -397,6 +404,11 @@ func (f *FirestoreProvider) UpsertEnergyHistories(ctx context.Context, siteID st
 func (f *FirestoreProvider) UpsertWeather(ctx context.Context, siteID string, weather []types.Weather, version int) error {
 	if len(weather) == 0 {
 		return nil
+	}
+	for _, w := range weather {
+		if w.TSDayStart.IsZero() {
+			return errors.New("weather tsDayStart cannot be zero")
+		}
 	}
 
 	coll, err := f.getCollection(siteID, "weather")
@@ -425,6 +437,10 @@ func (f *FirestoreProvider) UpsertWeather(ctx context.Context, siteID string, we
 
 	// For multiple items, use BulkWriter
 	bw := f.client.BulkWriter(ctx)
+	var endOnce sync.Once
+	endBW := func() { endOnce.Do(func() { bw.End() }) }
+	defer endBW()
+
 	jobs := make([]*firestore.BulkWriterJob, 0, len(weather))
 
 	for _, w := range weather {
@@ -447,7 +463,7 @@ func (f *FirestoreProvider) UpsertWeather(ctx context.Context, siteID string, we
 		jobs = append(jobs, job)
 	}
 
-	bw.End()
+	endBW()
 
 	for _, job := range jobs {
 		if _, err := job.Results(); err != nil {
@@ -460,6 +476,10 @@ func (f *FirestoreProvider) UpsertWeather(ctx context.Context, siteID string, we
 
 // GetWeather retrieves weather records within the specified time range.
 func (f *FirestoreProvider) GetWeather(ctx context.Context, siteID string, start, end time.Time) ([]types.Weather, error) {
+	if !start.Before(end) {
+		return nil, nil
+	}
+
 	coll, err := f.getCollection(siteID, "weather")
 	if err != nil {
 		return nil, err
@@ -505,6 +525,11 @@ func (f *FirestoreProvider) GetWeather(ctx context.Context, siteID string, start
 			continue
 		}
 
+		dayEnd := w.TSDayStart.AddDate(0, 0, 1)
+		if !dayEnd.After(start) || !w.TSDayStart.Before(end) {
+			continue
+		}
+
 		weather = append(weather, w)
 	}
 	return weather, nil
@@ -512,6 +537,10 @@ func (f *FirestoreProvider) GetWeather(ctx context.Context, siteID string, start
 
 // GetEnergyHistory retrieves energy history records within the specified time range.
 func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.DailyEnergyStats, error) {
+	if !start.Before(end) {
+		return nil, nil
+	}
+
 	coll, err := f.getCollection(siteID, "energy_history")
 	if err != nil {
 		return nil, err
@@ -557,6 +586,12 @@ func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, siteID string,
 			log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal daily energy stats", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("failed to unmarshal daily energy stats (id=%s): %w", doc.Ref.ID, err)
 		}
+
+		dayEnd := s.TSDayStart.AddDate(0, 0, 1)
+		if !dayEnd.After(start) || !s.TSDayStart.Before(end) {
+			continue
+		}
+
 		allStats = append(allStats, s)
 	}
 
@@ -592,25 +627,42 @@ func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context, site
 		}
 	}
 
-	ts, err := time.Parse("2006-01-02", doc.Ref.ID)
-	if err != nil {
-		return time.Time{}, 0, fmt.Errorf("invalid energy history doc id %s: %w", doc.Ref.ID, err)
-	}
 	// If this doc is daily, the latest actual recorded hour needs to be extracted from JSON
 	val, err := doc.DataAt("json")
 	if err == nil {
 		if jsonStr, ok := val.(string); ok {
 			var s types.DailyEnergyStats
-			if err := json.Unmarshal([]byte(jsonStr), &s); err == nil && len(s.Hourly) > 0 {
-				latest := s.Hourly[0].TSHourStart
-				for _, h := range s.Hourly {
-					if h.TSHourStart.After(latest) {
-						latest = h.TSHourStart
+			if err := json.Unmarshal([]byte(jsonStr), &s); err == nil {
+				if len(s.Hourly) > 0 {
+					latest := s.Hourly[0].TSHourStart
+					for _, h := range s.Hourly {
+						if h.TSHourStart.After(latest) {
+							latest = h.TSHourStart
+						}
 					}
+					return latest, version, nil
 				}
-				return latest, version, nil
+				if !s.TSDayStart.IsZero() {
+					if s.TimeLocation != "" {
+						if loc, err := time.LoadLocation(s.TimeLocation); err == nil {
+							return s.TSDayStart.In(loc), version, nil
+						}
+					}
+					return s.TSDayStart, version, nil
+				}
 			}
 		}
+	}
+
+	if tsVal, err := doc.DataAt("tsDayStart"); err == nil {
+		if t, ok := tsVal.(time.Time); ok && !t.IsZero() {
+			return t, version, nil
+		}
+	}
+
+	ts, err := time.Parse("2006-01-02", doc.Ref.ID)
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("invalid energy history doc id %s: %w", doc.Ref.ID, err)
 	}
 
 	return ts, version, nil
@@ -618,6 +670,9 @@ func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context, site
 
 // GetSite retrieves a site from the "sites" collection.
 func (f *FirestoreProvider) GetSite(ctx context.Context, siteID string) (types.Site, error) {
+	if siteID == "" {
+		return types.Site{}, errors.New("siteID cannot be empty")
+	}
 	doc, err := f.client.Collection("sites").Doc(siteID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -765,6 +820,9 @@ func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release strin
 
 // GetUser retrieves a user from the "users" collection.
 func (f *FirestoreProvider) GetUser(ctx context.Context, userID string) (types.User, error) {
+	if userID == "" {
+		return types.User{}, errors.New("userID cannot be empty")
+	}
 	doc, err := f.client.Collection("users").Doc(userID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -823,6 +881,10 @@ func (f *FirestoreProvider) UpsertPrices(ctx context.Context, siteID string, pri
 
 	// For multiple items, use BulkWriter
 	bw := f.client.BulkWriter(ctx)
+	var endOnce sync.Once
+	endBW := func() { endOnce.Do(func() { bw.End() }) }
+	defer endBW()
+
 	jobs := make([]*firestore.BulkWriterJob, 0, len(prices))
 
 	for _, p := range prices {
@@ -844,7 +906,7 @@ func (f *FirestoreProvider) UpsertPrices(ctx context.Context, siteID string, pri
 		jobs = append(jobs, job)
 	}
 
-	bw.End()
+	endBW()
 
 	for _, job := range jobs {
 		if _, err := job.Results(); err != nil {
@@ -857,6 +919,10 @@ func (f *FirestoreProvider) UpsertPrices(ctx context.Context, siteID string, pri
 
 // GetPriceHistory retrieves price records within the specified time range for a site.
 func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Price, error) {
+	if !start.Before(end) {
+		return nil, nil
+	}
+
 	coll, err := f.getCollection(siteID, "price_history")
 	if err != nil {
 		return nil, err
@@ -1000,6 +1066,9 @@ func (f *FirestoreProvider) GetLatestWeatherTime(ctx context.Context, siteID str
 // It fails atomically if a document with the same siteID already exists,
 // preventing race conditions.
 func (f *FirestoreProvider) CreateSite(ctx context.Context, siteID string, site types.Site) error {
+	if siteID == "" {
+		return errors.New("siteID cannot be empty")
+	}
 	siteJSON, err := json.Marshal(site)
 	if err != nil {
 		return fmt.Errorf("failed to marshal site %s: %w", siteID, err)
@@ -1015,6 +1084,9 @@ func (f *FirestoreProvider) CreateSite(ctx context.Context, siteID string, site 
 
 // UpdateSite updates a site document in the "sites" collection.
 func (f *FirestoreProvider) UpdateSite(ctx context.Context, siteID string, site types.Site) error {
+	if siteID == "" {
+		return errors.New("siteID cannot be empty")
+	}
 	siteJSON, err := json.Marshal(site)
 	if err != nil {
 		return fmt.Errorf("failed to marshal site %s: %w", siteID, err)
@@ -1030,6 +1102,9 @@ func (f *FirestoreProvider) UpdateSite(ctx context.Context, siteID string, site 
 
 // CreateUser creates a new user document in the "users" collection.
 func (f *FirestoreProvider) CreateUser(ctx context.Context, user types.User) error {
+	if user.ID == "" {
+		return errors.New("userID cannot be empty")
+	}
 	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user %s: %w", user.ID, err)
@@ -1045,6 +1120,9 @@ func (f *FirestoreProvider) CreateUser(ctx context.Context, user types.User) err
 
 // UpdateUser updates an existing user document in the "users" collection.
 func (f *FirestoreProvider) UpdateUser(ctx context.Context, user types.User) error {
+	if user.ID == "" {
+		return errors.New("userID cannot be empty")
+	}
 	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user %s: %w", user.ID, err)
@@ -1195,6 +1273,9 @@ func (f *FirestoreProvider) GetESSMockState(ctx context.Context, siteID string) 
 
 // InsertFeedback adds a new feedback record to the "feedback" collection.
 func (f *FirestoreProvider) InsertFeedback(ctx context.Context, feedback types.Feedback) error {
+	if feedback.ID == "" {
+		return errors.New("feedback ID cannot be empty")
+	}
 	jsonBytes, err := json.Marshal(feedback)
 	if err != nil {
 		return fmt.Errorf("failed to marshal feedback: %w", err)
@@ -1213,6 +1294,9 @@ func (f *FirestoreProvider) InsertFeedback(ctx context.Context, feedback types.F
 
 // ListFeedback retrieves feedback records, sorted by ID descending.
 func (f *FirestoreProvider) ListFeedback(ctx context.Context, limit int, lastFeedbackID string) ([]types.Feedback, error) {
+	if limit <= 0 {
+		return nil, errors.New("limit must be greater than 0")
+	}
 	coll := f.client.Collection("feedback")
 
 	q := coll.OrderBy("id", firestore.Desc).Limit(limit)
@@ -1258,6 +1342,9 @@ func (f *FirestoreProvider) ListFeedback(ctx context.Context, limit int, lastFee
 
 // UpsertUtilityPrices adds or updates multiple price records for a utility.
 func (f *FirestoreProvider) UpsertUtilityPrices(ctx context.Context, utilityID string, prices []types.PriceState, version int) error {
+	if utilityID == "" {
+		return errors.New("utilityID cannot be empty")
+	}
 	if len(prices) == 0 {
 		return nil
 	}
@@ -1283,6 +1370,10 @@ func (f *FirestoreProvider) UpsertUtilityPrices(ctx context.Context, utilityID s
 	}
 
 	bw := f.client.BulkWriter(ctx)
+	var endOnce sync.Once
+	endBW := func() { endOnce.Do(func() { bw.End() }) }
+	defer endBW()
+
 	jobs := make([]*firestore.BulkWriterJob, 0, len(prices))
 
 	for _, p := range prices {
@@ -1304,7 +1395,7 @@ func (f *FirestoreProvider) UpsertUtilityPrices(ctx context.Context, utilityID s
 		jobs = append(jobs, job)
 	}
 
-	bw.End()
+	endBW()
 
 	for _, job := range jobs {
 		if _, err := job.Results(); err != nil {
@@ -1317,6 +1408,13 @@ func (f *FirestoreProvider) UpsertUtilityPrices(ctx context.Context, utilityID s
 
 // GetUtilityPrices retrieves price records within the specified time range for a utility.
 func (f *FirestoreProvider) GetUtilityPrices(ctx context.Context, utilityID string, start, end time.Time) ([]types.PriceState, error) {
+	if utilityID == "" {
+		return nil, errors.New("utilityID cannot be empty")
+	}
+	if !start.Before(end) {
+		return nil, nil
+	}
+
 	coll := f.client.Collection("utilities").Doc(utilityID).Collection("hourly_prices")
 
 	iter := coll.
@@ -1380,6 +1478,9 @@ func (f *FirestoreProvider) UpsertInterest(ctx context.Context, submission types
 
 // ListInterest retrieves interest submissions, sorted by timestamp descending.
 func (f *FirestoreProvider) ListInterest(ctx context.Context, limit int) ([]types.InterestSubmission, error) {
+	if limit <= 0 {
+		return nil, errors.New("limit must be greater than 0")
+	}
 	coll := f.client.Collection("interest")
 
 	iter := coll.OrderBy("timestamp", firestore.Desc).Limit(limit).Documents(ctx)
@@ -1723,6 +1824,10 @@ func (f *FirestoreProvider) DeleteUser(ctx context.Context, userID string) error
 func (f *FirestoreProvider) deleteCollection(ctx context.Context, coll *firestore.CollectionRef) error {
 	iter := coll.DocumentRefs(ctx)
 	bw := f.client.BulkWriter(ctx)
+	var endOnce sync.Once
+	endBW := func() { endOnce.Do(func() { bw.End() }) }
+	defer endBW()
+
 	var jobs []*firestore.BulkWriterJob
 	for {
 		docRef, err := iter.Next()
@@ -1738,7 +1843,7 @@ func (f *FirestoreProvider) deleteCollection(ctx context.Context, coll *firestor
 		}
 		jobs = append(jobs, job)
 	}
-	bw.End()
+	endBW()
 	for _, job := range jobs {
 		if _, err := job.Results(); err != nil {
 			return err
@@ -1956,7 +2061,7 @@ func (f *FirestoreProvider) GetNotificationLogs(ctx context.Context, siteID stri
 
 	startUTC := start.UTC()
 	endUTC := end.UTC()
-	if startUTC.After(endUTC) {
+	if !startUTC.Before(endUTC) {
 		return nil, nil
 	}
 
