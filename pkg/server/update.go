@@ -545,7 +545,7 @@ func (s *Server) performSiteUpdate(
 
 	// execute Action
 	minSOC := int(math.Round(settings.Settings.GetMinBatterySOC(ctx, s.now(), status.Timestamp.Location(), currentPrice)))
-	modesChanged, err := s.setESSModes(ctx, siteID, essSystem, action.BatteryMode, types.ModesOptions{ChargeToSOC: action.ChargeToSOC, MinimumSOC: minSOC}, settings)
+	modesChanged, err := s.setESSModes(ctx, siteID, essSystem, action.BatteryMode, action.SolarMode, types.ModesOptions{ChargeToSOC: action.ChargeToSOC, MinimumSOC: minSOC}, settings)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to set mode", slog.Any("error", err))
 		action.Description += fmt.Sprintf(" (FAILED: %v)", err)
@@ -930,6 +930,7 @@ func (s *Server) setESSModes(
 	siteID string,
 	essSystem ess.System,
 	batteryMode types.BatteryMode,
+	solarMode types.SolarMode,
 	opts types.ModesOptions,
 	settings settingsWithVersion,
 ) (bool, error) {
@@ -937,16 +938,20 @@ func (s *Server) setESSModes(
 		return false, err
 	}
 
+	if solarMode == types.SolarModeNoChange {
+		solarMode = types.SolarModeAny
+	}
+
 	var changed bool
 	var err error
 	switch batteryMode {
 	case types.BatteryModeChargeAny:
-		changed, err = essSystem.SetModes(ctx, types.BatteryModeChargeAny, types.SolarModeAny, opts) // Force charge
+		changed, err = essSystem.SetModes(ctx, types.BatteryModeChargeAny, solarMode, opts) // Force charge
 	case types.BatteryModeLoad:
-		changed, err = essSystem.SetModes(ctx, types.BatteryModeLoad, types.SolarModeAny, opts) // Use battery
+		changed, err = essSystem.SetModes(ctx, types.BatteryModeLoad, solarMode, opts) // Use battery
 	case types.BatteryModeStandby:
 		// "self_consumption" is usually safe for idle too (just don't force charge)
-		changed, err = essSystem.SetModes(ctx, types.BatteryModeStandby, types.SolarModeAny, opts)
+		changed, err = essSystem.SetModes(ctx, types.BatteryModeStandby, solarMode, opts)
 	}
 
 	if err != nil {

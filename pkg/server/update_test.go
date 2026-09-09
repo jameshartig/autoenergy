@@ -2023,7 +2023,7 @@ func TestSetESSModes(t *testing.T) {
 			version: 1,
 		}
 
-		_, err := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeChargeAny, types.ModesOptions{}, settings)
+		_, err := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeChargeAny, types.SolarModeAny, types.ModesOptions{}, settings)
 		assert.NoError(t, err)
 		mockS.AssertExpectations(t)
 		mockES.AssertExpectations(t)
@@ -2056,7 +2056,7 @@ func TestSetESSModes(t *testing.T) {
 			version: 1,
 		}
 
-		_, err := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeLoad, types.ModesOptions{}, settings)
+		_, err := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeLoad, types.SolarModeAny, types.ModesOptions{}, settings)
 		assert.ErrorIs(t, err, ess.ErrUnauthorized)
 		mockS.AssertExpectations(t)
 		mockES.AssertExpectations(t)
@@ -2086,7 +2086,7 @@ func TestSetESSModes(t *testing.T) {
 			version: 1,
 		}
 
-		_, err := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeStandby, types.ModesOptions{}, settings)
+		_, err := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeStandby, types.SolarModeAny, types.ModesOptions{}, settings)
 		assert.ErrorIs(t, err, otherErr)
 		mockS.AssertNotCalled(t, "SetSettings")
 		mockES.AssertExpectations(t)
@@ -2108,10 +2108,30 @@ func TestSetESSModes(t *testing.T) {
 		}
 
 		srv := &Server{}
-		modesChanged, err := srv.setESSModes(common.CtxWithWaitGroup(context.Background(), &sync.WaitGroup{}), "test-site", mockES, types.BatteryModeLoad, types.ModesOptions{}, settings)
+		modesChanged, err := srv.setESSModes(common.CtxWithWaitGroup(context.Background(), &sync.WaitGroup{}), "test-site", mockES, types.BatteryModeLoad, types.SolarModeAny, types.ModesOptions{}, settings)
 		require.NoError(t, err)
 		assert.True(t, modesChanged)
 		assert.True(t, wgFound)
+	})
+
+	t.Run("SolarMode is forwarded to ESS SetModes and defaults to SolarModeAny", func(t *testing.T) {
+		mockES := &mockESS{}
+		// Test explicit solarMode forwarding (e.g. SolarModeNoExport)
+		mockES.On("SetModes", mock.Anything, types.BatteryModeLoad, types.SolarModeNoExport, mock.Anything).Return(true, nil).Once()
+		// Test SolarModeNoChange defaulting to SolarModeAny
+		mockES.On("SetModes", mock.Anything, types.BatteryModeChargeAny, types.SolarModeAny, mock.Anything).Return(true, nil).Once()
+
+		srv := &Server{}
+		settings := settingsWithVersion{Settings: types.Settings{ESS: "tesla"}, version: 1}
+
+		changed1, err1 := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeLoad, types.SolarModeNoExport, types.ModesOptions{}, settings)
+		require.NoError(t, err1)
+		assert.True(t, changed1)
+
+		changed2, err2 := srv.setESSModes(context.Background(), "test-site", mockES, types.BatteryModeChargeAny, types.SolarModeNoChange, types.ModesOptions{}, settings)
+		require.NoError(t, err2)
+		assert.True(t, changed2)
+		mockES.AssertExpectations(t)
 	})
 }
 
