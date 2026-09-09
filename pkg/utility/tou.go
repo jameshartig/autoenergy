@@ -712,7 +712,14 @@ func touUtilityInfo() []types.UtilityProviderInfo {
 									OtherDollarsPerKWH: 0.24362,
 									OtherDescription:   "June Total Consumption Charge Tier 1",
 								},
-								// TODO: get July onward rates once they're posted
+								{
+									Year:               2026,
+									MonthStart:         time.July,
+									MonthEnd:           time.September,
+									OtherDollarsPerKWH: 0.26408,
+									OtherDescription:   "July - September Total Consumption Charge Tier 1",
+								},
+								// TODO: get October onward rates once they're posted
 							},
 						),
 					),
@@ -809,6 +816,35 @@ func touUtilityInfo() []types.UtilityProviderInfo {
 									OtherName:          "Off-Peak",
 									OtherDollarsPerKWH: 0.24494,
 									OtherDescription:   "June Total Consumption Charge Base",
+								},
+								{
+									Year:       2026,
+									MonthStart: time.July,
+									MonthEnd:   time.September,
+									HoursAndDays: []touSimplifiedHoursAndDays{
+										{
+											Name: "High Peak",
+											Hours: []types.UtilityHourPeriod{
+												{HourStart: 13, HourEnd: 17},
+											},
+											Weekday:       true,
+											DollarsPerKWH: 0.35124,
+											Description:   "July - September Total Consumption Charge High Peak",
+										},
+										{
+											Name: "Low Peak",
+											Hours: []types.UtilityHourPeriod{
+												{HourStart: 10, HourEnd: 13},
+												{HourStart: 17, HourEnd: 20},
+											},
+											Weekday:       true,
+											DollarsPerKWH: 0.29284,
+											Description:   "July - September Total Consumption Charge Low Peak",
+										},
+									},
+									OtherName:          "Off-Peak",
+									OtherDollarsPerKWH: 0.26540,
+									OtherDescription:   "July - September Total Consumption Charge Base",
 								},
 							},
 						),

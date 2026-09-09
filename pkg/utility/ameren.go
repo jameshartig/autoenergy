@@ -53,6 +53,7 @@ func configuredAmerenSmart(db storage.Database) *baseAmerenSmart {
 func (c *baseAmerenSmart) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 	log.Ctx(ctx).DebugContext(ctx, "getting current ameren price")
 
+	// MISO operates in ET
 	now := time.Now().In(etLocation)
 
 	// Ameren PSP uses day-ahead prices for real-time without true-ups
@@ -74,6 +75,7 @@ func (c *baseAmerenSmart) GetCurrentPrice(ctx context.Context) (types.Price, err
 // contains the day ahead hourly prices for the given date range.
 func (c *baseAmerenSmart) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
 	var cached []types.Price
+	// MISO operates in ET
 	curr := start.In(etLocation).Truncate(time.Hour)
 	func() {
 		c.mu.Lock()
@@ -126,6 +128,7 @@ func (c *baseAmerenSmart) GetConfirmedPrices(ctx context.Context, start, end tim
 // GetFuturePrices gets the future prices for Ameren PSP rate plan which
 // contains the day ahead hourly prices for the given date range.
 func (c *baseAmerenSmart) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
+	// MISO operates in ET
 	now := time.Now().In(etLocation)
 	today := truncateDay(now)
 	tomorrow := today.AddDate(0, 0, 1)
@@ -142,10 +145,11 @@ func (c *baseAmerenSmart) GetFuturePrices(ctx context.Context) ([]types.Price, e
 	}
 
 	var future []types.Price
+	nowHour := now.Truncate(time.Hour)
 	for _, p := range append(pricesToday, pricesTomorrow...) {
 		// by truncating we ensure we get the current hour as well since that hour
 		// isn't over yet
-		if p.TSStart.After(now.Truncate(time.Hour)) {
+		if p.TSStart.After(nowHour) {
 			future = append(future, p)
 		}
 	}
@@ -154,7 +158,9 @@ func (c *baseAmerenSmart) GetFuturePrices(ctx context.Context) ([]types.Price, e
 }
 
 func (c *baseAmerenSmart) getPricesForDate(ctx context.Context, date time.Time) ([]types.Price, error) {
-	dateStr := date.Format("20060102")
+	// MISO operates in ET
+	dateET := date.In(etLocation)
+	dateStr := dateET.Format("20060102")
 
 	c.mu.Lock()
 	if prices, ok := c.cachedPrices[dateStr]; ok && len(prices) > 0 {
@@ -178,9 +184,9 @@ func (c *baseAmerenSmart) getPricesForDate(ctx context.Context, date time.Time) 
 				"ameren prices not found in cache, checking database",
 				slog.String("date", dateStr),
 			)
-			start := truncateDay(date)
-			end := start.AddDate(0, 0, 1)
-			expectedHours := int(end.Sub(start).Hours())
+			start := truncateDay(dateET).In(ctLocation)
+			end := start.Add(24 * time.Hour)
+			expectedHours := 24
 			dbPrices, err := c.db.GetUtilityPrices(ctx, "ameren", start, end)
 			if err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "failed to get ameren prices from database", slog.Any("error", err))
@@ -202,7 +208,7 @@ func (c *baseAmerenSmart) getPricesForDate(ctx context.Context, date time.Time) 
 			}
 		}
 
-		prices, err := c.fetchMISODayAhead(ctx, date, c.cpnodeID)
+		prices, err := c.fetchMISODayAhead(ctx, dateET, c.cpnodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +244,9 @@ func (c *baseAmerenSmart) getPricesForDate(ctx context.Context, date time.Time) 
 }
 
 func (c *baseAmerenSmart) fetchMISODayAhead(ctx context.Context, date time.Time, cpnode string) ([]types.Price, error) {
-	dateStr := date.Format("20060102")
+	// MISO operates in ET
+	dateET := date.In(etLocation)
+	dateStr := dateET.Format("20060102")
 	url := fmt.Sprintf("%s/%s_da_expost_lmp.csv", c.misoAPIURL, dateStr)
 	log.Ctx(ctx).DebugContext(ctx, "fetching miso day ahead prices for ameren", slog.String("date", dateStr), slog.String("url", url))
 
@@ -323,8 +331,10 @@ func (c *baseAmerenSmart) fetchMISODayAhead(ctx context.Context, date time.Time,
 					continue
 				}
 
-				// HE1 = 00:00 - 01:00 EST
-				t := time.Date(date.Year(), date.Month(), date.Day(), i-1, 0, 0, 0, etLocation)
+				// MISO publishes in Eastern Prevailing Time (EPT).
+				// HE 1 is Hour Ending 1:00 AM EPT (00:00 - 01:00 EPT), which is 23:00 - 00:00 CT of previous day.
+				tET := time.Date(dateET.Year(), dateET.Month(), dateET.Day(), i-1, 0, 0, 0, etLocation)
+				t := tET.In(ctLocation)
 				lmp := val / 1000.0 // $/MWh to $/kWh
 
 				// Rider PSP says EC = [LMP + ASEC + MSC] * LossFactor
@@ -358,9 +368,9 @@ func (c *baseAmerenSmart) fetchMISODayAhead(ctx context.Context, date time.Time,
 // see https://www.ameren.com/bill/rates/residential (Distrubtion Loss Factors pdf)
 func amerenLossFactor(t time.Time) float64 {
 	switch {
-	case t.Before(time.Date(2026, time.June, 1, 0, 0, 0, 0, etLocation)):
+	case t.Before(time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation)):
 		return 1.05009
-	case t.Before(time.Date(2027, time.June, 1, 0, 0, 0, 0, etLocation)):
+	case t.Before(time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation)):
 		return 1.04895
 	default:
 		return 1.04895
@@ -415,8 +425,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		// Applies all hours, both summer and non-summer.
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.02629,
 			GridAdditional: true,
@@ -424,8 +435,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		},
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.02765,
 			GridAdditional: true,
@@ -435,8 +447,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		// ── 2026 Distribution Delivery Charge ────────────────────────────────
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.04572, // first-tier non-summer rate; see tiering note above
 			GridAdditional: true,
@@ -444,8 +457,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		},
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.07811,
 			GridAdditional: true,
@@ -453,8 +467,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		},
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.04572, // first-tier non-summer rate
 			GridAdditional: true,
@@ -464,8 +479,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		// ── 2027 Distribution Delivery Charge ────────────────────────────────
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.04687, // first-tier non-summer rate
 			GridAdditional: true,
@@ -473,8 +489,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		},
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.08009,
 			GridAdditional: true,
@@ -482,8 +499,9 @@ func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityFeesPerio
 		},
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH:  0.04687, // first-tier non-summer rate
 			GridAdditional: true,
@@ -506,8 +524,9 @@ func getAmerenBGSFees(opts types.UtilityRateOptions) ([]types.UtilityFeesPeriod,
 		// Summer 2026 Supply Charge
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH: (8.200 - 0.095 + .308) / 100,
 			Description:   "Ameren IL BGS-1 Summer Retail Purchased Electricity Charge",
@@ -515,8 +534,9 @@ func getAmerenBGSFees(opts types.UtilityRateOptions) ([]types.UtilityFeesPeriod,
 		// Non-Summer 2026 (Jan - May) Supply Charge
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH: 0.07283,
 			Description:   "Ameren IL BGS-1 Non-Summer Retail Purchased Electricity Charge",
@@ -524,8 +544,9 @@ func getAmerenBGSFees(opts types.UtilityRateOptions) ([]types.UtilityFeesPeriod,
 		// Non-Summer 2026 (Oct - Dec) Supply Charge
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH: 0.07283,
 			Description:   "Ameren IL BGS-1 Non-Summer Retail Purchased Electricity Charge",
@@ -533,8 +554,9 @@ func getAmerenBGSFees(opts types.UtilityRateOptions) ([]types.UtilityFeesPeriod,
 		// Summer 2027 Supply Charge
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH: (8.200 - 0.095 + .308) / 100,
 			Description:   "Ameren IL BGS-1 Summer Retail Purchased Electricity Charge",
@@ -542,8 +564,9 @@ func getAmerenBGSFees(opts types.UtilityRateOptions) ([]types.UtilityFeesPeriod,
 		// Non-Summer 2027 (Jan - May) Supply Charge
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH: 0.07283,
 			Description:   "Ameren IL BGS-1 Non-Summer Retail Purchased Electricity Charge",
@@ -551,8 +574,9 @@ func getAmerenBGSFees(opts types.UtilityRateOptions) ([]types.UtilityFeesPeriod,
 		// Non-Summer 2027 (Oct - Dec) Supply Charge
 		{
 			TimePeriod: types.TimePeriod{
-				Start: time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				LocationPtr: ctLocation,
 			},
 			DollarsPerKWH: 0.07283,
 			Description:   "Ameren IL BGS-1 Non-Summer Retail Purchased Electricity Charge",

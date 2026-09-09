@@ -32,53 +32,6 @@ func getEversourceHolidays(year int) []string {
 	return formatHolidays(holidays, year)
 }
 
-// eversourceVPPPeriods generates the VPP periods for CT Eversource.
-func eversourceVPPPeriods(opts types.UtilityRateOptions, years []int) (types.UtilityVPPInfo, error) {
-	if opts.VPPProgram != "ess-passive" {
-		return types.UtilityVPPInfo{}, nil
-	}
-
-	var periods []types.UtilityVPPPeriod
-
-	for _, year := range years {
-		june19 := juneteenth(year)
-		july4 := independenceDay(year)
-
-		holidays := []string{
-			june19.Format("2006-01-02"),
-			july4.Format("2006-01-02"),
-		}
-
-		for _, month := range []time.Month{time.June, time.July, time.August} {
-			p := types.UtilityVPPPeriod{
-				TimePeriod: types.TimePeriod{
-					Start: time.Date(year, month, 1, 0, 0, 0, 0, etLocation),
-					End:   time.Date(year, month+1, 1, 0, 0, 0, 0, etLocation),
-					Hours: []types.UtilityHourPeriod{
-						{HourStart: 17, HourEnd: 20},
-					},
-					DaysOfTheWeek: []time.Weekday{
-						time.Monday,
-						time.Tuesday,
-						time.Wednesday,
-						time.Thursday,
-						time.Friday,
-					},
-					SpecificDates:    holidays,
-					SpecificDatesNot: true,
-					LocationPtr:      etLocation,
-				},
-				ReserveSOC: 20,
-			}
-			periods = append(periods, p)
-		}
-	}
-
-	return types.UtilityVPPInfo{
-		Mandatory: periods,
-	}, nil
-}
-
 // eversourcePeriods generates the fees period slice for a specific Eversource rate plan.
 func eversourcePeriods(plan string, opts types.UtilityRateOptions, years []int) []types.UtilityFeesPeriod {
 	var periods []types.UtilityFeesPeriod

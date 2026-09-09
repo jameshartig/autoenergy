@@ -224,6 +224,14 @@ func TestTOUUtility(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 0.24362, p.DollarsPerKWH)
 
+		p, err = u.priceForTime(time.Date(2026, time.July, 15, 12, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.26408, p.DollarsPerKWH)
+
+		p, err = u.priceForTime(time.Date(2026, time.September, 15, 12, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.26408, p.DollarsPerKWH)
+
 		// Test R-1B
 		err = u.ApplySettings(context.Background(), types.Settings{
 			UtilityProvider: "ladwp",
@@ -256,6 +264,36 @@ func TestTOUUtility(t *testing.T) {
 		p, err = u.priceForTime(time.Date(2026, time.June, 6, 14, 0, 0, 0, ptLocation))
 		require.NoError(t, err)
 		assert.Equal(t, 0.24494, p.DollarsPerKWH)
+
+		// July - September High Peak (13:00 - 17:00 Weekdays) - July 13, 2026 is Monday
+		p, err = u.priceForTime(time.Date(2026, time.July, 13, 14, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.35124, p.DollarsPerKWH)
+
+		// July - September Low Peak (10:00 - 13:00 Weekdays)
+		p, err = u.priceForTime(time.Date(2026, time.July, 13, 11, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.29284, p.DollarsPerKWH)
+
+		// July - September Low Peak (17:00 - 20:00 Weekdays)
+		p, err = u.priceForTime(time.Date(2026, time.July, 13, 18, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.29284, p.DollarsPerKWH)
+
+		// July - September Base (20:00 - 10:00 Weekdays)
+		p, err = u.priceForTime(time.Date(2026, time.July, 13, 21, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.26540, p.DollarsPerKWH)
+
+		// July - September Base (Weekends) - July 18, 2026 is Saturday
+		p, err = u.priceForTime(time.Date(2026, time.July, 18, 14, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.26540, p.DollarsPerKWH)
+
+		// September High Peak - September 14, 2026 is Monday
+		p, err = u.priceForTime(time.Date(2026, time.September, 14, 14, 0, 0, 0, ptLocation))
+		require.NoError(t, err)
+		assert.Equal(t, 0.35124, p.DollarsPerKWH)
 
 		// Jan-Mar Peak - February 2, 2026 is Monday
 		p, err = u.priceForTime(time.Date(2026, time.February, 2, 14, 0, 0, 0, ptLocation))

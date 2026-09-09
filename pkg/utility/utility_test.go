@@ -418,8 +418,8 @@ func TestRatesCoverAllTime(t *testing.T) {
 								// PEA/HPEA fallback ends Jan 1, 2027, so it has 3 before Jan 1 2027 and 2 after.
 								isMatch = len(applicableNames) == 2 || len(applicableNames) == 3
 							} else if rate.ID == "comed_best" {
-								// PJM Component and BEST TOU charge are both GridAdditional: false
-								isMatch = len(applicableNames) == 2
+								// PJM Component, TPEA, and BEST TOU charge are GridAdditional: false
+								isMatch = len(applicableNames) == 3
 							}
 							if !isMatch {
 								failures++

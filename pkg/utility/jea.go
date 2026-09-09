@@ -48,9 +48,11 @@ func getJEAFuelCharge(year int, month time.Month) float64 {
 			return 0.04494
 		case time.July:
 			return 0.04386
+		case time.August, time.September:
+			return 0.04282
 		}
 	}
-	return 0.04386
+	return 0.04282
 }
 
 func jeaPeriods(plan string, opts types.UtilityRateOptions, years []int) []types.UtilityFeesPeriod {

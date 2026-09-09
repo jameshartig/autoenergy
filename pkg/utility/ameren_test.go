@@ -23,9 +23,12 @@ func TestAmeren(t *testing.T) {
 		assert.Nil(t, periods)
 	})
 
-	now := time.Now().In(etLocation)
-	todayStr := now.Format("20060102")
-	tomorrowStr := now.Add(24 * time.Hour).Format("20060102")
+	now := time.Now().In(ctLocation)
+	nowET := now.In(etLocation)
+	todayET := truncateDay(nowET)
+	tomorrowET := todayET.AddDate(0, 0, 1)
+	todayStr := todayET.Format("20060102")
+	tomorrowStr := tomorrowET.Format("20060102")
 
 	t.Run("GetCurrentPrice_And_Futures", func(t *testing.T) {
 		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,20 +63,20 @@ IGNORE
 		// Test current price
 		price, err := c.GetCurrentPrice(ctx)
 		require.NoError(t, err)
-		expectedTodayVal := 10 + float64(now.Hour())
+		expectedTodayVal := 10 + float64(now.In(etLocation).Hour())
 		assert.InDelta(t, (expectedTodayVal/1000.0)*amerenLossFactor(now), price.DollarsPerKWH, 0.00001)
 		assert.Equal(t, "ameren_psp", price.Provider)
+		assert.Equal(t, ctLocation, price.TSStart.Location())
+		assert.Equal(t, ctLocation, price.TSEnd.Location())
 
 		// Test future prices
 		futures, err := c.GetFuturePrices(ctx)
 		require.NoError(t, err)
 		assert.True(t, len(futures) > 0)
 
-		// Next hour price should be from futures[0]
-		// If current hour is 23, the next hour will be tomorrow's first hour (40)
-		expectedNextHourVal := expectedTodayVal + 1
 		nextHour := now.Truncate(time.Hour).Add(time.Hour)
-		if now.Hour() == 23 {
+		expectedNextHourVal := 10 + float64(nextHour.In(etLocation).Hour())
+		if now.In(etLocation).Hour() == 23 {
 			expectedNextHourVal = 40
 		}
 		if assert.NotEmpty(t, futures) {
@@ -140,10 +143,10 @@ AMIL.BGS6,Loadzone,LMP,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,
 	t.Run("GetConfirmedPrices", func(t *testing.T) {
 		// Use a hardcoded non-DST transition date to avoid hour count variations (23/24/25)
 		// when testing with fixed 24-column mock CSV data.
-		start := time.Date(2024, time.January, 15, 0, 0, 0, 0, etLocation)
+		start := time.Date(2024, time.January, 15, 0, 0, 0, 0, ctLocation)
 		end := start.Add(24 * time.Hour)
-		startStr := start.Format("20060102")
-		endStr := end.Format("20060102")
+		startStr := start.In(etLocation).Format("20060102")
+		endStr := end.In(etLocation).Format("20060102")
 
 		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/csv")
@@ -171,6 +174,8 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		assert.True(t, len(prices) >= 23 && len(prices) <= 25)
 		if assert.NotEmpty(t, prices) {
 			assert.InDelta(t, (10.0/1000.0)*amerenLossFactor(start), prices[0].DollarsPerKWH, 0.00001)
+			assert.Equal(t, ctLocation, prices[0].TSStart.Location())
+			assert.Equal(t, ctLocation, prices[0].TSEnd.Location())
 		}
 	})
 
@@ -216,10 +221,10 @@ AMIL.BGS6,Loadzone,LMP,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,
 		futuresError, err := cError.GetFuturePrices(ctx)
 		require.NoError(t, err)
 
-		if now.Hour() < 23 {
+		if now.In(etLocation).Hour() < 23 {
 			if assert.NotEmpty(t, futuresError) {
 				nextHour := now.Truncate(time.Hour).Add(time.Hour)
-				assert.InDelta(t, (float64(10+now.Hour()+1)/1000.0)*amerenLossFactor(nextHour), futuresError[0].DollarsPerKWH, 0.00001)
+				assert.InDelta(t, (float64(10+nextHour.In(etLocation).Hour())/1000.0)*amerenLossFactor(nextHour), futuresError[0].DollarsPerKWH, 0.00001)
 			}
 		} else {
 			assert.Empty(t, futuresError)
@@ -257,8 +262,8 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		ctx := context.Background()
 
 		// 1. GetCurrentPrice - DB Empty -> API -> DB Upsert
-		start := truncateDay(time.Now().In(etLocation))
-		end := start.AddDate(0, 0, 1)
+		start := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, etLocation).In(ctLocation)
+		end := start.Add(24 * time.Hour)
 		m.On("GetUtilityPrices", mock.Anything, "ameren", start, end).Return([]types.PriceState{}, nil).Once()
 		m.On("UpsertUtilityPrices", mock.Anything, "ameren", mock.MatchedBy(func(p []types.PriceState) bool {
 			return len(p) >= 23
@@ -276,7 +281,8 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		c.mu.Unlock()
 
 		var fullDayPrices []types.PriceState
-		start = truncateDay(time.Now().In(etLocation))
+		start = time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, etLocation).In(ctLocation)
+		end = start.Add(24 * time.Hour)
 		for i := 0; i < 24; i++ {
 			fullDayPrices = append(fullDayPrices, types.PriceState{
 				Price: types.Price{
@@ -314,12 +320,12 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		ctx := context.Background()
 
 		// 1. Mock DB returns only 1 price state (partial data)
-		start := truncateDay(time.Now().In(etLocation))
-		end := start.AddDate(0, 0, 1)
+		start := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, etLocation).In(ctLocation)
+		end := start.Add(24 * time.Hour)
 		m.On("GetUtilityPrices", mock.Anything, "ameren", start, end).Return([]types.PriceState{
 			{
 				Price: types.Price{
-					TSStart:       time.Now().In(etLocation).Truncate(time.Hour),
+					TSStart:       time.Now().In(ctLocation).Truncate(time.Hour),
 					DollarsPerKWH: 0.99, // dummy value
 				},
 				Confirmed: true,
@@ -353,14 +359,15 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		c.misoAPIURL = api.URL
 		ctx := context.Background()
 
-		start := time.Date(2024, time.January, 15, 0, 0, 0, 0, etLocation)
+		start := time.Date(2024, time.January, 15, 0, 0, 0, 0, ctLocation)
 		end := start.Add(27 * time.Hour) // asking for 24 hours of first day + 3 hours of next day
 
-		dateStr := start.Format("20060102")
+		dateStr := start.In(etLocation).Format("20060102")
 
+		misoStart := time.Date(2024, time.January, 15, 0, 0, 0, 0, etLocation).In(ctLocation)
 		var cached []types.Price
 		for i := 0; i < 24; i++ {
-			cached = append(cached, types.Price{TSStart: start.Add(time.Duration(i) * time.Hour), TSEnd: start.Add(time.Duration(i+1) * time.Hour), DollarsPerKWH: 0.1})
+			cached = append(cached, types.Price{TSStart: misoStart.Add(time.Duration(i) * time.Hour), TSEnd: misoStart.Add(time.Duration(i+1) * time.Hour), DollarsPerKWH: 0.1})
 		}
 
 		// Fill cache to contain the whole first day
@@ -368,10 +375,9 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		c.cachedPrices[dateStr] = cached
 		c.mu.Unlock()
 
-		// DB query should be for the SECOND day (the remainder)
-		expectedCurr := start.Add(24 * time.Hour)
-		expectedDBStart := truncateDay(expectedCurr)
-		expectedDBEnd := expectedDBStart.AddDate(0, 0, 1)
+		// DB query should be for the SECOND day (the remainder in ET)
+		expectedDBStart := time.Date(2024, time.January, 16, 0, 0, 0, 0, etLocation).In(ctLocation)
+		expectedDBEnd := expectedDBStart.Add(24 * time.Hour)
 
 		m.On("GetUtilityPrices", mock.Anything, "ameren", expectedDBStart, expectedDBEnd).Return([]types.PriceState{}, nil).Once()
 		m.On("UpsertUtilityPrices", mock.Anything, "ameren", mock.MatchedBy(func(p []types.PriceState) bool {
@@ -382,8 +388,8 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 		require.NoError(t, err)
 		if assert.Len(t, prices, 27) {
 			assert.Equal(t, 0.1, prices[0].DollarsPerKWH)                                                     // from cache
-			assert.Equal(t, 0.1, prices[23].DollarsPerKWH)                                                    // from cache
-			assert.InDelta(t, 0.01*amerenLossFactor(prices[24].TSStart), prices[24].DollarsPerKWH, 0.0000001) // from API fallback
+			assert.Equal(t, 0.1, prices[22].DollarsPerKWH)                                                    // from cache
+			assert.InDelta(t, 0.01*amerenLossFactor(prices[23].TSStart), prices[23].DollarsPerKWH, 0.0000001) // from API fallback
 		}
 
 		m.AssertExpectations(t)
@@ -392,16 +398,16 @@ AMIL.BGS6,Loadzone,LMP,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
 
 func TestAmerenBGSAndLossFactor(t *testing.T) {
 	t.Run("Loss factor transitions", func(t *testing.T) {
-		// Before June 1, 2026 (EST/EDT) -> 1.05009
-		t1 := time.Date(2026, time.May, 31, 23, 0, 0, 0, etLocation)
+		// Before June 1, 2026 (CST/CDT) -> 1.05009
+		t1 := time.Date(2026, time.May, 31, 23, 0, 0, 0, ctLocation)
 		assert.Equal(t, 1.05009, amerenLossFactor(t1))
 
 		// On/After June 1, 2026 -> 1.04895
-		t2 := time.Date(2026, time.June, 1, 0, 0, 0, 0, etLocation)
+		t2 := time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation)
 		assert.Equal(t, 1.04895, amerenLossFactor(t2))
 
 		// Later in 2026
-		t3 := time.Date(2026, time.December, 15, 12, 0, 0, 0, etLocation)
+		t3 := time.Date(2026, time.December, 15, 12, 0, 0, 0, ctLocation)
 		assert.Equal(t, 1.04895, amerenLossFactor(t3))
 	})
 

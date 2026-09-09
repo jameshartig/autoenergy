@@ -77,7 +77,7 @@ func epbFCAPeriods(years []int) []types.UtilityFeesPeriod {
 				{
 					Year:       2026,
 					MonthStart: time.July,
-					MonthEnd:   time.December,
+					MonthEnd:   time.July,
 					HoursAndDays: []touSimplifiedHoursAndDays{
 						{
 							DollarsPerKWH: 0.02825,
@@ -85,16 +85,38 @@ func epbFCAPeriods(years []int) []types.UtilityFeesPeriod {
 						},
 					},
 				},
+				{
+					Year:       2026,
+					MonthStart: time.August,
+					MonthEnd:   time.August,
+					HoursAndDays: []touSimplifiedHoursAndDays{
+						{
+							DollarsPerKWH: 0.02631,
+							Description:   "EPB Fuel Cost Adjustment",
+						},
+					},
+				},
+				{
+					Year:       2026,
+					MonthStart: time.September,
+					MonthEnd:   time.December,
+					HoursAndDays: []touSimplifiedHoursAndDays{
+						{
+							DollarsPerKWH: 0.02535,
+							Description:   "EPB Fuel Cost Adjustment",
+						},
+					},
+				},
 			}...)
 		} else {
-			// 2027 and later (assumes the latest rate from July 2026)
+			// 2027 and later (assumes the latest rate from September 2026)
 			simplified = append(simplified, touSimplifiedPeriod{
 				Year:       year,
 				MonthStart: time.January,
 				MonthEnd:   time.December,
 				HoursAndDays: []touSimplifiedHoursAndDays{
 					{
-						DollarsPerKWH: 0.02825,
+						DollarsPerKWH: 0.02535,
 						Description:   "EPB Fuel Cost Adjustment",
 					},
 				},

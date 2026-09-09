@@ -27,6 +27,16 @@ func TestEPB(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.12325, p.DollarsPerKWH+p.GridUseDollarsPerKWH, 1e-6)
 
+		// August 15, 2026: base rate ($0.095) + August FCA ($0.02631) = $0.12131
+		p, err = u.priceForTime(time.Date(2026, time.August, 15, 12, 0, 0, 0, ny))
+		require.NoError(t, err)
+		assert.InDelta(t, 0.12131, p.DollarsPerKWH+p.GridUseDollarsPerKWH, 1e-6)
+
+		// September 15, 2026: base rate ($0.095) + September FCA ($0.02535) = $0.12035
+		p, err = u.priceForTime(time.Date(2026, time.September, 15, 12, 0, 0, 0, ny))
+		require.NoError(t, err)
+		assert.InDelta(t, 0.12035, p.DollarsPerKWH+p.GridUseDollarsPerKWH, 1e-6)
+
 		// January 15, 2026: base rate ($0.095) + Jan FCA ($0.03021) = $0.12521
 		p, err = u.priceForTime(time.Date(2026, time.January, 15, 12, 0, 0, 0, ny))
 		require.NoError(t, err)

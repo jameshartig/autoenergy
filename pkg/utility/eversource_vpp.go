@@ -62,6 +62,60 @@ func configuredEversourceVPP(db storage.Database) *baseEversourceVPP {
 	return c
 }
 
+// eversourceVPPPeriods generates the VPP periods for CT Eversource.
+/*
+Passive discharge events are limited to non-holiday weekdays during the Summer season (June,
+July and August) only. Holidays excluded from Passive Dispatch events include:
+Holidays for Passive Dispatch Events
+Summer Independence Day July 4
+Summer Juneteenth June 19
+*/
+func eversourceVPPPeriods(opts types.UtilityRateOptions, years []int) (types.UtilityVPPInfo, error) {
+	if opts.VPPProgram != "ess-passive" {
+		return types.UtilityVPPInfo{}, nil
+	}
+
+	var periods []types.UtilityVPPPeriod
+
+	for _, year := range years {
+		june19 := juneteenth(year)
+		july4 := independenceDay(year)
+
+		holidays := []string{
+			june19.Format("2006-01-02"),
+			july4.Format("2006-01-02"),
+		}
+
+		for _, month := range []time.Month{time.June, time.July, time.August} {
+			p := types.UtilityVPPPeriod{
+				TimePeriod: types.TimePeriod{
+					Start: time.Date(year, month, 1, 0, 0, 0, 0, etLocation),
+					End:   time.Date(year, month+1, 1, 0, 0, 0, 0, etLocation),
+					Hours: []types.UtilityHourPeriod{
+						{HourStart: 17, HourEnd: 20},
+					},
+					DaysOfTheWeek: []time.Weekday{
+						time.Monday,
+						time.Tuesday,
+						time.Wednesday,
+						time.Thursday,
+						time.Friday,
+					},
+					SpecificDates:    holidays,
+					SpecificDatesNot: true,
+					LocationPtr:      etLocation,
+				},
+				ReserveSOC: 20,
+			}
+			periods = append(periods, p)
+		}
+	}
+
+	return types.UtilityVPPInfo{
+		Mandatory: periods,
+	}, nil
+}
+
 // parseVPPHistory parses raw HTML from Eversource's VPP history page and extracts
 // daily rates found across month tables. If targetStart or targetEnd are provided (non-zero),
 // parsing will filter to dates in [targetStart, targetEnd] and short-circuit early once older dates are encountered.
