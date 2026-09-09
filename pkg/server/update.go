@@ -106,7 +106,7 @@ func (s *Server) handleUpdateSites(w http.ResponseWriter, r *http.Request) {
 		slog.String("cron", cronParam),
 		slog.Any("groups", groups),
 	)
-	settingsMap, versionsMap, err := s.storage.ListSitesSettings(ctx, s.release, groups)
+	settingsMap, versionsMap, updatedTimesMap, err := s.storage.ListSitesSettings(ctx, s.release, groups)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to list sites settings", slog.Any("error", err))
 		writeJSONError(w, "failed to list sites settings", http.StatusInternalServerError)
@@ -121,6 +121,7 @@ func (s *Server) handleUpdateSites(w http.ResponseWriter, r *http.Request) {
 
 	for siteID, settings := range settingsMap {
 		version := versionsMap[siteID]
+		updatedTime := updatedTimesMap[siteID]
 		g.Go(func() error {
 			if err := gCtx.Err(); err != nil {
 				return err
@@ -131,7 +132,7 @@ func (s *Server) handleUpdateSites(w http.ResponseWriter, r *http.Request) {
 
 			ctx := log.With(siteCtx, log.Ctx(siteCtx).With(slog.Group("update", slog.String("siteID", siteID))))
 
-			sv, creds, err := s.migrateAndDecryptSettings(ctx, siteID, settings, version)
+			sv, creds, err := s.migrateAndDecryptSettings(ctx, siteID, settings, version, updatedTime)
 			if err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "failed to get site settings", slog.Any("error", err))
 				return nil
@@ -952,7 +953,7 @@ func (s *Server) setESSModes(
 		if errors.Is(err, ess.ErrUnauthorized) {
 			settings.ESSAuthStatus.ConsecutiveSetFailures++
 			settings.ESSAuthStatus.LastAttempt = s.now().UTC()
-			if dbErr := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version); dbErr != nil {
+			if dbErr := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version, settings.updatedAt); dbErr != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "failed to update settings auth status after set modes failure", slog.Any("error", dbErr))
 			}
 		}
@@ -962,7 +963,7 @@ func (s *Server) setESSModes(
 	if settings.ESSAuthStatus.ConsecutiveSetFailures > 0 {
 		settings.ESSAuthStatus.ConsecutiveSetFailures = 0
 		settings.ESSAuthStatus.LastAttempt = s.now().UTC()
-		if dbErr := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version); dbErr != nil {
+		if dbErr := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version, settings.updatedAt); dbErr != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to update settings auth status after set modes success", slog.Any("error", dbErr))
 		}
 	}

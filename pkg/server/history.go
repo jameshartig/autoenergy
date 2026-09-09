@@ -370,7 +370,7 @@ func (s *Server) handleEstimateEVCharging(w http.ResponseWriter, r *http.Request
 	}
 
 	var loc *time.Location
-	if settings, _, err := s.storage.GetSettings(ctx, siteID); err == nil && settings.Location != nil && settings.Location.TimeZone != "" {
+	if settings, _, _, err := s.storage.GetSettings(ctx, siteID); err == nil && settings.Location != nil && settings.Location.TimeZone != "" {
 		if l, err := time.LoadLocation(settings.Location.TimeZone); err == nil {
 			loc = l
 		}

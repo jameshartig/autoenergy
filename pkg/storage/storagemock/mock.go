@@ -15,17 +15,16 @@ type MockDatabase struct {
 
 var _ storage.Database = (*MockDatabase)(nil)
 
-func (m *MockDatabase) GetSettings(ctx context.Context, siteID string) (types.Settings, int, error) {
+func (m *MockDatabase) GetSettings(ctx context.Context, siteID string) (types.Settings, int, time.Time, error) {
 	args := m.Called(ctx, siteID)
-	// return empty if not specified, or checks args
 	if len(args) > 0 {
-		return args.Get(0).(types.Settings), args.Int(1), args.Error(2)
+		return args.Get(0).(types.Settings), args.Int(1), args.Get(2).(time.Time), args.Error(3)
 	}
-	return types.Settings{}, 0, nil
+	return types.Settings{}, 0, time.Time{}, nil
 }
 
-func (m *MockDatabase) SetSettings(ctx context.Context, siteID string, settings types.Settings, version int) error {
-	args := m.Called(ctx, siteID, settings, version)
+func (m *MockDatabase) SetSettings(ctx context.Context, siteID string, settings types.Settings, version int, updatedTime time.Time) error {
+	args := m.Called(ctx, siteID, settings, version, updatedTime)
 	return args.Error(0)
 }
 
@@ -154,12 +153,24 @@ func (m *MockDatabase) ListSites(ctx context.Context) ([]types.Site, error) {
 	return nil, nil
 }
 
-func (m *MockDatabase) ListSitesSettings(ctx context.Context, release string, updateGroup []int) (map[string]types.Settings, map[string]int, error) {
+func (m *MockDatabase) ListSitesSettings(ctx context.Context, release string, updateGroup []int) (map[string]types.Settings, map[string]int, map[string]time.Time, error) {
 	args := m.Called(ctx, release, updateGroup)
 	if len(args) > 0 {
-		return args.Get(0).(map[string]types.Settings), args.Get(1).(map[string]int), args.Error(2)
+		var times map[string]time.Time
+		if tm, ok := args.Get(2).(map[string]time.Time); ok {
+			times = tm
+		}
+		var setMap map[string]types.Settings
+		if sm, ok := args.Get(0).(map[string]types.Settings); ok {
+			setMap = sm
+		}
+		var verMap map[string]int
+		if vm, ok := args.Get(1).(map[string]int); ok {
+			verMap = vm
+		}
+		return setMap, verMap, times, args.Error(3)
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 func (m *MockDatabase) GetLatestAction(ctx context.Context, siteID string) (*types.Action, error) {

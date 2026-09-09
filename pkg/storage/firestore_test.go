@@ -43,19 +43,39 @@ func TestFirestoreProvider(t *testing.T) {
 			MinBatterySOC:                  5.5,
 		}
 		// Pass version 1
-		require.NoError(t, f.SetSettings(ctx, "test-site", settings, 1))
+		require.NoError(t, f.SetSettings(ctx, "test-site", settings, 1, time.Time{}))
 
-		gotSettings, version, err := f.GetSettings(ctx, "test-site")
+		gotSettings, version, updatedTime, err := f.GetSettings(ctx, "test-site")
 		require.NoError(t, err)
 		assert.Equal(t, 1, version)
+		assert.False(t, updatedTime.IsZero())
 		assert.Equal(t, settings.AlwaysChargeUnderDollarsPerKWH, gotSettings.AlwaysChargeUnderDollarsPerKWH)
 		assert.Equal(t, settings.MinBatterySOC, gotSettings.MinBatterySOC)
 		assert.Equal(t, settings.DryRun, gotSettings.DryRun)
 		assert.Equal(t, settings.DryRun, gotSettings.DryRun)
 	})
 
+	t.Run("SettingsConflict", func(t *testing.T) {
+		siteID := "conflict-site"
+		settings := types.Settings{DryRun: true}
+		require.NoError(t, f.SetSettings(ctx, siteID, settings, 1, time.Time{}))
+
+		gotSettings, version, updatedTime, err := f.GetSettings(ctx, siteID)
+		require.NoError(t, err)
+
+		// Successful update with matching updatedTime
+		gotSettings.DryRun = false
+		require.NoError(t, f.SetSettings(ctx, siteID, gotSettings, version, updatedTime))
+
+		// Conflicting update with stale updatedTime
+		staleSettings := gotSettings
+		staleSettings.DryRun = true
+		err = f.SetSettings(ctx, siteID, staleSettings, version, updatedTime)
+		assert.ErrorIs(t, err, ErrSettingsConflict)
+	})
+
 	t.Run("EmptySiteID", func(t *testing.T) {
-		_, _, err := f.GetSettings(ctx, "")
+		_, _, _, err := f.GetSettings(ctx, "")
 		assert.ErrorContains(t, err, "siteID cannot be empty")
 	})
 
@@ -408,41 +428,43 @@ func TestFirestoreProvider(t *testing.T) {
 			set2 := types.Settings{UpdateGroup: 7, Release: "staging"}
 			set3 := types.Settings{UpdateGroup: 0, Release: "production"}
 
-			require.NoError(t, f.SetSettings(ctx, "site-group-3", set1, 1))
-			require.NoError(t, f.SetSettings(ctx, "site-group-7", set2, 1))
-			require.NoError(t, f.SetSettings(ctx, "site-group-0", set3, 1))
+			require.NoError(t, f.SetSettings(ctx, "site-group-3", set1, 1, time.Time{}))
+			require.NoError(t, f.SetSettings(ctx, "site-group-7", set2, 1, time.Time{}))
+			require.NoError(t, f.SetSettings(ctx, "site-group-0", set3, 1, time.Time{}))
 
 			// Query with empty release and nil updateGroup: should return all
-			allSettings, allVersions, err := f.ListSitesSettings(ctx, "", nil)
+			allSettings, allVersions, allTimes, err := f.ListSitesSettings(ctx, "", nil)
 			require.NoError(t, err)
 			assert.Contains(t, allSettings, "site-group-3")
 			assert.Contains(t, allSettings, "site-group-7")
 			assert.Contains(t, allSettings, "site-group-0")
+			assert.False(t, allTimes["site-group-3"].IsZero())
 			assert.Equal(t, 3, allSettings["site-group-3"].UpdateGroup)
 			assert.Equal(t, 7, allSettings["site-group-7"].UpdateGroup)
 			assert.Equal(t, 0, allSettings["site-group-0"].UpdateGroup)
 			assert.Equal(t, 1, allVersions["site-group-3"])
 
 			// Query with release "staging": should only return site-group-7
-			stagingSettings, _, err := f.ListSitesSettings(ctx, "staging", nil)
+			stagingSettings, _, _, err := f.ListSitesSettings(ctx, "staging", nil)
 			require.NoError(t, err)
 			assert.NotContains(t, stagingSettings, "site-group-3")
 			assert.Contains(t, stagingSettings, "site-group-7")
 			assert.NotContains(t, stagingSettings, "site-group-0")
 
 			// Query with release "production" and updateGroup [3, 4]: should only return site-group-3
-			prodGroupSettings, _, err := f.ListSitesSettings(ctx, "production", []int{3, 4})
+			prodGroupSettings, _, _, err := f.ListSitesSettings(ctx, "production", []int{3, 4})
 			require.NoError(t, err)
 			assert.Contains(t, prodGroupSettings, "site-group-3")
 			assert.NotContains(t, prodGroupSettings, "site-group-7")
 			assert.NotContains(t, prodGroupSettings, "site-group-0")
 
 			// Query with empty release and [3, 4] updateGroup: should error
-			filteredSettings, filteredVersions, err := f.ListSitesSettings(ctx, "", []int{3, 4})
+			filteredSettings, filteredVersions, filteredTimes, err := f.ListSitesSettings(ctx, "", []int{3, 4})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "release cannot be empty")
 			assert.Nil(t, filteredSettings)
 			assert.Nil(t, filteredVersions)
+			assert.Nil(t, filteredTimes)
 		})
 
 		t.Run("DeleteSite", func(t *testing.T) {
@@ -454,7 +476,7 @@ func TestFirestoreProvider(t *testing.T) {
 			require.NoError(t, f.UpdateSite(ctx, siteID, site))
 
 			// Create some settings (subcollection config)
-			require.NoError(t, f.SetSettings(ctx, siteID, types.Settings{UpdateGroup: 5}, 1))
+			require.NoError(t, f.SetSettings(ctx, siteID, types.Settings{UpdateGroup: 5}, 1, time.Time{}))
 
 			// Verify site exists
 			gotSite, err := f.GetSite(ctx, siteID)
@@ -469,7 +491,7 @@ func TestFirestoreProvider(t *testing.T) {
 			assert.ErrorContains(t, err, "site not found")
 
 			// Verify config/settings is deleted
-			_, ver, err := f.GetSettings(ctx, siteID)
+			_, ver, _, err := f.GetSettings(ctx, siteID)
 			require.NoError(t, err)
 			assert.Equal(t, 0, ver)
 		})

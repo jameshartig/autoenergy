@@ -6,12 +6,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/storage"
 	"github.com/raterudder/raterudder/pkg/types"
 )
 
@@ -85,30 +87,25 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 		usePrefix := false
 		if len(prefix) >= 5 {
-			existingSites, err := s.storage.ListSites(ctx)
-			if err != nil {
-				log.Ctx(ctx).ErrorContext(ctx, "join: failed to list sites", slog.Any("error", err))
-			} else {
-				siteIDs := make(map[string]struct{}, len(existingSites))
-				for _, st := range existingSites {
-					siteIDs[st.ID] = struct{}{}
-				}
+			minDigits := 8 - len(prefix) - 1
+			if minDigits < 1 {
+				minDigits = 1
+			}
 
-				minDigits := 8 - len(prefix) - 1
-				if minDigits < 1 {
-					minDigits = 1
+			for i := 0; i < 10; i++ {
+				try := prefix
+				if i > 0 || len(prefix) < 8 {
+					try = fmt.Sprintf("%s_%0*d", prefix, minDigits, i)
 				}
-
-				for i := 0; i < 10; i++ {
-					try := prefix
-					if i > 0 || len(prefix) < 8 {
-						try = fmt.Sprintf("%s_%0*d", prefix, minDigits, i)
-					}
-					if _, exists := siteIDs[try]; !exists {
+				_, err := s.storage.GetSite(ctx, try)
+				if err != nil {
+					if errors.Is(err, storage.ErrSiteNotFound) {
 						prefix = try
 						usePrefix = true
 						break
 					}
+					log.Ctx(ctx).ErrorContext(ctx, "join: failed to get site", slog.String("siteID", try), slog.Any("error", err))
+					break
 				}
 			}
 		} else {

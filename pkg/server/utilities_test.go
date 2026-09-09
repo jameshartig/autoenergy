@@ -257,7 +257,7 @@ func TestHandleGetPeriods(t *testing.T) {
 		mockStorage.On("GetSettings", mock.Anything, "test-site").Return(types.Settings{
 			UtilityProvider: "pg_e",
 			UtilityRate:     "pg_e_e_tou_c",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		srv := &Server{
 			utilities:  mockUMap,
@@ -292,7 +292,7 @@ func TestHandleGetPeriods(t *testing.T) {
 		mockStorage.On("GetSettings", mock.Anything, "test-site").Return(types.Settings{
 			UtilityProvider: "comed",
 			UtilityRate:     "comed_besh",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		srv := &Server{
 			utilities:  utility.Configured(mockStorage),
@@ -321,7 +321,7 @@ func TestHandleGetPeriods(t *testing.T) {
 		mockStorage.On("GetSettings", mock.Anything, "test-site").Return(types.Settings{
 			UtilityProvider: "comed",
 			UtilityRate:     "comed_bes",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		srv := &Server{
 			utilities:  mockUMap,

@@ -34,7 +34,7 @@ func TestHandleForecast(t *testing.T) {
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",
 			ESS:             "mock",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{}, nil)
 		mockS.On("GetPriceHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 		mockS.On("GetHistorySummaries", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.HistorySummary{}, nil)
@@ -100,7 +100,7 @@ func TestHandleForecast(t *testing.T) {
 			UtilityProvider:            "test",
 			ESS:                        "mock",
 			HomeLoadPredictionStrategy: "default",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		// Generate mock history with high load variance at hour 12
 		history := []types.EnergyStats{}
@@ -182,7 +182,7 @@ func TestHandleForecast(t *testing.T) {
 	t.Run("Settings Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
 		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
-		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{}, 0, assert.AnError)
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{}, 0, time.Time{}, assert.AnError)
 
 		srv := &Server{
 			storage:    mockS,
@@ -207,7 +207,7 @@ func TestHandleForecast(t *testing.T) {
 		mockS := &mockStorage{}
 		mockS.On("GetLatestAction", mock.Anything, mock.Anything).Return((*types.Action)(nil), nil)
 		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
-		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test", ESS: "mock"}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test", ESS: "mock"}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		mockES := &mockESS{}
 		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
@@ -241,7 +241,7 @@ func TestHandleForecast(t *testing.T) {
 		mockS := &mockStorage{}
 		mockS.On("GetLatestAction", mock.Anything, mock.Anything).Return((*types.Action)(nil), nil)
 		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
-		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test", ESS: "mock"}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test", ESS: "mock"}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		mockES := &mockESS{}
 		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
@@ -293,7 +293,7 @@ func TestHandleForecast(t *testing.T) {
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",
 			ESS:             "mock",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{}, nil)
 		mockS.On("GetPriceHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 		mockS.On("GetHistorySummaries", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.HistorySummary{}, nil)
@@ -365,7 +365,7 @@ func TestHandleForecast(t *testing.T) {
 				SolarAzimuth: 180,
 			},
 			ESS: "mock",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{
 			{Hourly: []types.EnergyStats{
 				{TSHourStart: pastHour2, SolarKWH: -0.005, HomeKWH: 2.0, MinBatterySOC: 40, MaxBatterySOC: 60},
@@ -470,7 +470,7 @@ func TestHandleForecast(t *testing.T) {
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",
 			ESS:             "mock",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{}, nil)
 		mockS.On("GetPriceHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 		mockS.On("GetHistorySummaries", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.HistorySummary{}, nil)
@@ -548,7 +548,7 @@ func TestHandleForecast(t *testing.T) {
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",
 			ESS:             "mock",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{}, nil)
 		mockS.On("GetPriceHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 		mockS.On("GetHistorySummaries", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.HistorySummary{}, nil)
@@ -614,7 +614,7 @@ func TestHandleForecast(t *testing.T) {
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",
 			ESS:             "mock",
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{}, nil)
 		mockS.On("GetPriceHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 		mockS.On("GetHistorySummaries", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.HistorySummary{}, nil)

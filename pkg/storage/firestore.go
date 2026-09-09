@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -109,18 +110,18 @@ func (f *FirestoreProvider) getCollection(siteID, name string) (*firestore.Colle
 }
 
 // GetSettings retrieves the dynamic configuration from the "config/settings" document.
-func (f *FirestoreProvider) GetSettings(ctx context.Context, siteID string) (types.Settings, int, error) {
+func (f *FirestoreProvider) GetSettings(ctx context.Context, siteID string) (types.Settings, int, time.Time, error) {
 	coll, err := f.getCollection(siteID, "config")
 	if err != nil {
-		return types.Settings{}, 0, err
+		return types.Settings{}, 0, time.Time{}, err
 	}
 	doc, err := coll.Doc("settings").Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			// Return default settings if not found
-			return types.Settings{}, 0, nil
+			return types.Settings{}, 0, time.Time{}, nil
 		}
-		return types.Settings{}, 0, fmt.Errorf("failed to fetch settings doc: %w", err)
+		return types.Settings{}, 0, time.Time{}, fmt.Errorf("failed to fetch settings doc: %w", err)
 	}
 
 	// Read version if available (default 0)
@@ -134,26 +135,27 @@ func (f *FirestoreProvider) GetSettings(ctx context.Context, siteID string) (typ
 	val, err := doc.DataAt("json")
 	if err != nil {
 		log.Ctx(ctx).WarnContext(ctx, "settings doc missing json", slog.String("siteID", siteID))
-		return types.Settings{}, 0, fmt.Errorf("settings document missing 'json' field: %w", err)
+		return types.Settings{}, 0, time.Time{}, fmt.Errorf("settings document missing 'json' field: %w", err)
 	}
 
 	jsonStr, ok := val.(string)
 	if !ok {
 		log.Ctx(ctx).WarnContext(ctx, "settings doc json not string", slog.String("siteID", siteID))
-		return types.Settings{}, 0, fmt.Errorf("settings 'json' field is not a string")
+		return types.Settings{}, 0, time.Time{}, fmt.Errorf("settings 'json' field is not a string")
 	}
 
 	var s types.Settings
 	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
 		log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal settings json", slog.String("siteID", siteID), slog.Any("err", err))
-		return types.Settings{}, 0, fmt.Errorf("failed to unmarshal settings json: %w", err)
+		return types.Settings{}, 0, time.Time{}, fmt.Errorf("failed to unmarshal settings json: %w", err)
 	}
-	return s, version, nil
+	return s, version, doc.UpdateTime, nil
 }
 
 // SetSettings saves the dynamic configuration to the "config/settings" document.
 // It stores the settings as a JSON string for portability.
-func (f *FirestoreProvider) SetSettings(ctx context.Context, siteID string, settings types.Settings, version int) error {
+// If updatedTime is non-zero, it runs in a transaction and ensures doc.UpdateTime matches updatedTime before writing.
+func (f *FirestoreProvider) SetSettings(ctx context.Context, siteID string, settings types.Settings, version int, updatedTime time.Time) error {
 	jsonBytes, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
@@ -163,12 +165,28 @@ func (f *FirestoreProvider) SetSettings(ctx context.Context, siteID string, sett
 	if err != nil {
 		return err
 	}
-	_, err = coll.Doc("settings").Set(ctx, map[string]any{
+
+	data := map[string]any{
 		"json":        string(jsonBytes),
 		"version":     version,
 		"updateGroup": settings.UpdateGroup,
 		"release":     settings.Release,
-	})
+	}
+
+	if !updatedTime.IsZero() {
+		return f.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+			doc, err := tx.Get(coll.Doc("settings"))
+			if err != nil {
+				return fmt.Errorf("failed to fetch settings doc for transaction: %w", err)
+			}
+			if !doc.UpdateTime.Equal(updatedTime) {
+				return fmt.Errorf("%w: settings updated at %v, expected %v", ErrSettingsConflict, doc.UpdateTime, updatedTime)
+			}
+			return tx.Set(coll.Doc("settings"), data)
+		})
+	}
+
+	_, err = coll.Doc("settings").Set(ctx, data)
 	if err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
@@ -740,14 +758,14 @@ func (f *FirestoreProvider) ListSites(ctx context.Context) ([]types.Site, error)
 
 // ListSitesSettings retrieves settings for sites, optionally filtered by updateGroup
 // and release. Release is required if updateGroup is provided.
-func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release string, updateGroup []int) (map[string]types.Settings, map[string]int, error) {
+func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release string, updateGroup []int) (map[string]types.Settings, map[string]int, map[string]time.Time, error) {
 	q := f.client.CollectionGroup("config").Query
 	if release != "" {
 		q = q.Where("release", "==", release)
 	}
 	if len(updateGroup) > 0 {
 		if release == "" {
-			return nil, nil, errors.New("release cannot be empty when updateGroup is specified")
+			return nil, nil, nil, errors.New("release cannot be empty when updateGroup is specified")
 		}
 		q = q.Where("updateGroup", "in", updateGroup)
 	}
@@ -756,6 +774,7 @@ func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release strin
 
 	settingsMap := make(map[string]types.Settings)
 	versionsMap := make(map[string]int)
+	updatedTimesMap := make(map[string]time.Time)
 
 	for {
 		doc, err := iter.Next()
@@ -763,7 +782,7 @@ func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release strin
 			break
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("error iterating config documents: %w", err)
+			return nil, nil, nil, fmt.Errorf("error iterating config documents: %w", err)
 		}
 
 		// Only look at the settings document
@@ -813,9 +832,10 @@ func (f *FirestoreProvider) ListSitesSettings(ctx context.Context, release strin
 
 		settingsMap[siteID] = s
 		versionsMap[siteID] = version
+		updatedTimesMap[siteID] = doc.UpdateTime
 	}
 
-	return settingsMap, versionsMap, nil
+	return settingsMap, versionsMap, updatedTimesMap, nil
 }
 
 // GetUser retrieves a user from the "users" collection.

@@ -78,7 +78,7 @@ func TestHandleHistorySavings(t *testing.T) {
 		mockStoreBase := &mockStorage{}
 		mockStoreBase.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{
 			GridExportSolar: false, // Default to false as it was before
-		}, types.CurrentSettingsVersion, nil)
+		}, types.CurrentSettingsVersion, time.Time{}, nil)
 		mockStore := &mockSavingsStorage{mockStorage: mockStoreBase}
 
 		setupMock(mockStore)
@@ -444,7 +444,7 @@ func TestHandleHistorySavings(t *testing.T) {
 			m.mockStorage.On("GetSettings", mock.Anything, types.SiteIDNone).Unset()
 			m.mockStorage.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{
 				GridExportSolar: true,
-			}, types.CurrentSettingsVersion, nil)
+			}, types.CurrentSettingsVersion, time.Time{}, nil)
 		})
 		assert.InDelta(t, 0.0, savings.Cost, 0.001, "Cost mismatch")
 		assert.InDelta(t, 1.00, savings.Credit, 0.001, "Credit mismatch")
@@ -474,7 +474,7 @@ func TestHandleHistorySavings(t *testing.T) {
 					NetMeteringCredits: true,
 				},
 				SolarNetMeteringCreditsValue: "highest",
-			}, types.CurrentSettingsVersion, nil)
+			}, types.CurrentSettingsVersion, time.Time{}, nil)
 		})
 		assert.InDelta(t, 0.0, savings.Cost, 0.001, "Cost mismatch")
 		assert.InDelta(t, 2.20, savings.Credit, 0.001, "Credit mismatch")
@@ -504,7 +504,7 @@ func TestHandleHistorySavings(t *testing.T) {
 					NetMeteringCredits: true,
 				},
 				SolarNetMeteringCreditsValue: "lowest",
-			}, types.CurrentSettingsVersion, nil)
+			}, types.CurrentSettingsVersion, time.Time{}, nil)
 		})
 		assert.InDelta(t, 0.0, savings.Cost, 0.001, "Cost mismatch")
 		assert.InDelta(t, 0.70, savings.Credit, 0.001, "Credit mismatch")
@@ -532,7 +532,7 @@ func TestHandleHistorySavings(t *testing.T) {
 					NetMeteringCredits: true,
 				},
 				SolarNetMeteringCreditsValue: "none",
-			}, types.CurrentSettingsVersion, nil)
+			}, types.CurrentSettingsVersion, time.Time{}, nil)
 		})
 		assert.InDelta(t, 0.0, savings.Cost, 0.001, "Cost mismatch")
 		assert.InDelta(t, 0.0, savings.Credit, 0.001, "Credit mismatch") // Should be 0 based on simulation logic
@@ -563,7 +563,7 @@ func TestHandleHistorySavings(t *testing.T) {
 			m.mockStorage.On("GetSettings", mock.Anything, types.SiteIDNone).Unset()
 			m.mockStorage.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{
 				GridExportSolar: true,
-			}, types.CurrentSettingsVersion, nil)
+			}, types.CurrentSettingsVersion, time.Time{}, nil)
 		})
 		assert.InDelta(t, 0.0, savings.Cost, 0.001, "Cost mismatch")
 		assert.InDelta(t, 0.80, savings.Credit, 0.001, "Credit mismatch")
@@ -587,7 +587,7 @@ func TestHandleHistorySavings(t *testing.T) {
 			m.mockStorage.On("GetSettings", mock.Anything, types.SiteIDNone).Unset()
 			m.mockStorage.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{
 				GridExportSolar: false,
-			}, types.CurrentSettingsVersion, nil)
+			}, types.CurrentSettingsVersion, time.Time{}, nil)
 		})
 		assert.InDelta(t, 0.0, savings.Cost, 0.001, "Cost mismatch")
 		assert.InDelta(t, 0.0, savings.Credit, 0.001, "Credit mismatch")
@@ -611,7 +611,7 @@ func TestHandleHistorySavings(t *testing.T) {
 
 	t.Run("Storage Error Propagated", func(t *testing.T) {
 		mockStore := &mockStorage{}
-		mockStore.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockStore.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{}, types.CurrentSettingsVersion, time.Time{}, nil)
 		// We explicitly assert the lookback (-24 hours) adjustment instead of using mock.AnythingOfType("time.Time")
 		mockStore.On("GetPriceHistory", mock.Anything, types.SiteIDNone, mock.MatchedBy(func(t time.Time) bool {
 			return t.Equal(start.AddDate(0, 0, -1))
@@ -676,8 +676,8 @@ func TestHandleHistorySavingsAll(t *testing.T) {
 		{Hourly: []types.EnergyStats{{TSHourStart: start, HomeKWH: 20, GridImportKWH: 20}}},
 	}, nil)
 
-	mockStore.On("GetSettings", mock.Anything, "site1").Return(types.Settings{}, types.CurrentSettingsVersion, nil)
-	mockStore.On("GetSettings", mock.Anything, "site2").Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+	mockStore.On("GetSettings", mock.Anything, "site1").Return(types.Settings{}, types.CurrentSettingsVersion, time.Time{}, nil)
+	mockStore.On("GetSettings", mock.Anything, "site2").Return(types.Settings{}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 	req, _ := http.NewRequest("GET", "/api/history/savings?siteID=ALL&start="+start.Format(time.RFC3339)+"&end="+end.Format(time.RFC3339), nil)
 	// Mock authMiddleware effects

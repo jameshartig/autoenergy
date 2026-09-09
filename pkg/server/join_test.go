@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/raterudder/raterudder/pkg/storage"
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -310,9 +311,9 @@ func TestHandleJoin(t *testing.T) {
 	t.Run("CreateNewSiteShortEmailPrefix", func(t *testing.T) {
 		store := &mockStorage{}
 
-		store.On("ListSites", mock.Anything).Return([]types.Site{}, nil)
-
 		// Prefix "short" is 5 chars (>= 5 and < 8), padded with _00 to make 8 chars: "short_00"
+		store.On("GetSite", mock.Anything, "short_00").Return(types.Site{}, storage.ErrSiteNotFound)
+
 		store.On("CreateSite", mock.Anything, "short_00", mock.MatchedBy(func(site types.Site) bool {
 			return site.InviteCode == "" && len(site.Permissions) == 1 && site.Permissions[0].UserID == "short@test.com"
 		})).Return(nil)
@@ -345,9 +346,8 @@ func TestHandleJoin(t *testing.T) {
 	t.Run("CreateNewSiteShortEmailPrefixCollision", func(t *testing.T) {
 		store := &mockStorage{}
 
-		store.On("ListSites", mock.Anything).Return([]types.Site{
-			{ID: "short_00"},
-		}, nil)
+		store.On("GetSite", mock.Anything, "short_00").Return(types.Site{ID: "short_00"}, nil)
+		store.On("GetSite", mock.Anything, "short_01").Return(types.Site{}, storage.ErrSiteNotFound)
 
 		// Expect CreateSite with "short_01"
 		store.On("CreateSite", mock.Anything, "short_01", mock.MatchedBy(func(site types.Site) bool {
@@ -382,8 +382,8 @@ func TestHandleJoin(t *testing.T) {
 	t.Run("CreateNewSiteLongEmailPrefix", func(t *testing.T) {
 		store := &mockStorage{}
 
-		// Expect ListSites to return no sites (meaning "longprefix" is available)
-		store.On("ListSites", mock.Anything).Return([]types.Site{}, nil)
+		// Expect GetSite to return ErrSiteNotFound (meaning "longprefix" is available)
+		store.On("GetSite", mock.Anything, "longprefix").Return(types.Site{}, storage.ErrSiteNotFound)
 
 		// Expect CreateSite with "longprefix"
 		store.On("CreateSite", mock.Anything, "longprefix", mock.MatchedBy(func(site types.Site) bool {
@@ -413,10 +413,9 @@ func TestHandleJoin(t *testing.T) {
 		store := &mockStorage{}
 
 		// Simulate existing sites that collide with the expected prefix to test collision resolution logic
-		store.On("ListSites", mock.Anything).Return([]types.Site{
-			{ID: "longprefix"},
-			{ID: "longprefix_1"},
-		}, nil)
+		store.On("GetSite", mock.Anything, "longprefix").Return(types.Site{ID: "longprefix"}, nil)
+		store.On("GetSite", mock.Anything, "longprefix_1").Return(types.Site{ID: "longprefix_1"}, nil)
+		store.On("GetSite", mock.Anything, "longprefix_2").Return(types.Site{}, storage.ErrSiteNotFound)
 
 		// Expect CreateSite to be called with the resolved non-colliding prefix 'longprefix_2'
 		store.On("CreateSite", mock.Anything, "longprefix_2", mock.MatchedBy(func(site types.Site) bool {
@@ -443,11 +442,11 @@ func TestHandleJoin(t *testing.T) {
 		store.AssertExpectations(t)
 	})
 
-	t.Run("CreateNewSiteListSitesErrorFallback", func(t *testing.T) {
+	t.Run("CreateNewSiteGetSiteErrorFallback", func(t *testing.T) {
 		store := &mockStorage{}
 
-		// Simulate a database error when attempting to list existing sites
-		store.On("ListSites", mock.Anything).Return([]types.Site{}, assert.AnError)
+		// Simulate a database error when attempting to get existing site
+		store.On("GetSite", mock.Anything, "longprefix").Return(types.Site{}, assert.AnError)
 
 		// Expect CreateSite to fall back to a 16-character randomly generated hex string
 		store.On("CreateSite", mock.Anything, mock.MatchedBy(func(id string) bool { return len(id) == 16 }), mock.MatchedBy(func(site types.Site) bool {

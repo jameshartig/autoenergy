@@ -55,7 +55,7 @@ func (m *historyMockStorage) GetPriceHistory(ctx context.Context, provider strin
 func setupTestServer(t *testing.T) (http.Handler, *historyMockStorage, *mockStorage) {
 	mockU := &mockUtility{}
 	mockSBase := &mockStorage{}
-	mockSBase.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
+	mockSBase.On("GetSettings", mock.Anything, types.SiteIDNone).Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 	mockS := &historyMockStorage{
 		mockStorage: mockSBase,
@@ -761,7 +761,7 @@ func TestHandleHistoryActionsAndSavings(t *testing.T) {
 			{Hourly: []types.EnergyStats{{TSHourStart: start, HomeKWH: 10, GridImportKWH: 10}}},
 		}, nil)
 		mockStore.On("GetActionHistory", mock.Anything, "site1", mock.Anything, mock.Anything).Return([]types.Action{}, nil)
-		mockStore.On("GetSettings", mock.Anything, "site1").Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockStore.On("GetSettings", mock.Anything, "site1").Return(types.Settings{}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		// Site 2 data
 		mockStore.On("GetPriceHistory", mock.Anything, "site2", mock.MatchedBy(func(t time.Time) bool {
@@ -779,7 +779,7 @@ func TestHandleHistoryActionsAndSavings(t *testing.T) {
 			{Hourly: []types.EnergyStats{{TSHourStart: start, HomeKWH: 20, GridImportKWH: 20}}},
 		}, nil)
 		mockStore.On("GetActionHistory", mock.Anything, "site2", mock.Anything, mock.Anything).Return([]types.Action{}, nil)
-		mockStore.On("GetSettings", mock.Anything, "site2").Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockStore.On("GetSettings", mock.Anything, "site2").Return(types.Settings{}, types.CurrentSettingsVersion, time.Time{}, nil)
 
 		req, _ := http.NewRequest("GET", "/api/history/actionsAndSavings?siteID=ALL&start="+start.Format(time.RFC3339)+"&end="+end.Format(time.RFC3339), nil)
 		// Mock authMiddleware effects
@@ -825,7 +825,7 @@ func TestHandleHistoryEnergy(t *testing.T) {
 				SolarTilt:    20,
 				SolarAzimuth: 180,
 			},
-		}, types.CurrentSettingsVersion, nil).Once()
+		}, types.CurrentSettingsVersion, time.Time{}, nil).Once()
 
 		mockS.On("GetHistorySummaries", mock.Anything, types.SiteIDNone, mock.Anything, mock.Anything).Return([]types.HistorySummary{
 			{
@@ -892,7 +892,7 @@ func TestHandleHistoryEnergy(t *testing.T) {
 				SolarTilt:    20,
 				SolarAzimuth: 180,
 			},
-		}, types.CurrentSettingsVersion, nil).Once()
+		}, types.CurrentSettingsVersion, time.Time{}, nil).Once()
 
 		mockS.On("GetHistorySummaries", mock.Anything, types.SiteIDNone, mock.Anything, mock.Anything).Return([]types.HistorySummary{
 			{
@@ -943,7 +943,7 @@ func TestHandleHistoryEnergy(t *testing.T) {
 				SolarTilt:    20,
 				SolarAzimuth: 180,
 			},
-		}, types.CurrentSettingsVersion, nil).Once()
+		}, types.CurrentSettingsVersion, time.Time{}, nil).Once()
 
 		mockS.On("GetHistorySummaries", mock.Anything, types.SiteIDNone, mock.Anything, mock.Anything).Return([]types.HistorySummary{
 			{
@@ -989,7 +989,7 @@ func TestHandleHistoryEnergy(t *testing.T) {
 				SolarTilt:    20,
 				SolarAzimuth: 180,
 			},
-		}, types.CurrentSettingsVersion, nil).Once()
+		}, types.CurrentSettingsVersion, time.Time{}, nil).Once()
 
 		// Prior Friday (May 29) has load 1.0, Target Friday (June 5) has load 10.0
 		priorFriday := d.AddDate(0, 0, -7)
@@ -1050,7 +1050,7 @@ func TestHandleEstimateEVCharging(t *testing.T) {
 	t.Run("NoHistory_ReturnsUndetected", func(t *testing.T) {
 		mockS := &mockStorage{}
 		mockS.On("GetEnergyHistory", mock.Anything, siteID, mock.Anything, mock.Anything).Return([]types.DailyEnergyStats{}, nil)
-		mockS.On("GetSettings", mock.Anything, siteID).Return(types.Settings{}, 1, nil)
+		mockS.On("GetSettings", mock.Anything, siteID).Return(types.Settings{}, 1, time.Time{}, nil)
 
 		srv := &Server{
 			storage: mockS,
@@ -1096,7 +1096,7 @@ func TestHandleEstimateEVCharging(t *testing.T) {
 		mockS.On("GetEnergyHistory", mock.Anything, siteID, mock.Anything, mock.Anything).Return(history, nil)
 		mockS.On("GetSettings", mock.Anything, siteID).Return(types.Settings{
 			Location: &types.SiteLocation{TimeZone: "UTC"},
-		}, 1, nil)
+		}, 1, time.Time{}, nil)
 
 		srv := &Server{
 			storage: mockS,

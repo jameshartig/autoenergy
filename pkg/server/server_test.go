@@ -32,11 +32,11 @@ func TestWebHandler(t *testing.T) {
 	mockUMap := utility.NewMap(nil)
 	mockUMap.SetProvider(types.SiteIDNone, mockU)
 
-	mockS.On("GetSettings", mock.Anything).Return(types.Settings{
+	mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
 		DryRun:          true,
 		MinBatterySOC:   5.0,
 		UtilityProvider: "test",
-	}, types.CurrentSettingsVersion, nil)
+	}, types.CurrentSettingsVersion, time.Time{}, nil).Maybe()
 	mockS.On("Ping", mock.Anything).Return(nil)
 
 	// Create a map-based filesystem for testing

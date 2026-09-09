@@ -11,16 +11,17 @@ import (
 )
 
 var (
-	ErrUserNotFound = errors.New("user not found")
-	ErrSiteNotFound = errors.New("site not found")
+	ErrUserNotFound     = errors.New("user not found")
+	ErrSiteNotFound     = errors.New("site not found")
+	ErrSettingsConflict = errors.New("settings conflict: cannot overwrite")
 )
 
 // Database defines the interface for persisting data and retrieving settings.
 type Database interface {
 	// Settings
-	GetSettings(ctx context.Context, siteID string) (types.Settings, int, error)
-	SetSettings(ctx context.Context, siteID string, settings types.Settings, version int) error
-	ListSitesSettings(ctx context.Context, release string, updateGroup []int) (map[string]types.Settings, map[string]int, error)
+	GetSettings(ctx context.Context, siteID string) (types.Settings, int, time.Time, error)
+	SetSettings(ctx context.Context, siteID string, settings types.Settings, version int, updatedTime time.Time) error
+	ListSitesSettings(ctx context.Context, release string, updateGroup []int) (map[string]types.Settings, map[string]int, map[string]time.Time, error)
 
 	// Data Persistence
 	// UpsertPrices adds or updates multiple price records.

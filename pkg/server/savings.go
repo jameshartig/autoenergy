@@ -142,7 +142,7 @@ func (s *Server) getSiteSavings(ctx context.Context, siteID string, start, end t
 	lookbackStart := start.AddDate(0, 0, -1)
 
 	// Fetch settings for this site
-	settings, _, err := s.storage.GetSettings(ctx, siteID)
+	settings, _, _, err := s.storage.GetSettings(ctx, siteID)
 	if err != nil {
 		return types.SavingsStats{}, nil, err
 	}
