@@ -379,6 +379,48 @@ func TestHandleHistorySavings(t *testing.T) {
 		assert.InDelta(t, 0.50, savings.BatterySavings, 0.001, "BatterySavings mismatch")
 	})
 
+	t.Run("Mixed Energy Discharge With Partial Pause", func(t *testing.T) {
+		savings := runTest(t, func(m *mockSavingsStorage) {
+			m.prices = []types.Price{
+				{TSStart: start.Add(-2 * time.Hour), TSEnd: start.Add(-1 * time.Hour), DollarsPerKWH: 0.10}, // Active charge @ $0.10
+				{TSStart: start.Add(-1 * time.Hour), TSEnd: start, DollarsPerKWH: 0.15},                     // Storm charge @ $0.15
+				{TSStart: start, TSEnd: start.Add(time.Hour), DollarsPerKWH: 0.20},                          // Discharge @ $0.20
+			}
+			m.stats = []types.EnergyStats{
+				{
+					TSHourStart:       start.Add(-2 * time.Hour),
+					GridImportKWH:     10,
+					BatteryChargedKWH: 10,
+				},
+				{
+					TSHourStart:       start.Add(-1 * time.Hour),
+					GridImportKWH:     5,
+					BatteryChargedKWH: 5,
+				},
+				{
+					TSHourStart:      start,
+					HomeKWH:          10,
+					BatteryUsedKWH:   10,
+					BatteryToHomeKWH: 10,
+				},
+			}
+			m.actions = []types.Action{
+				{Timestamp: start.Add(-1 * time.Hour), Reason: types.ActionReasonEmergencyMode},
+				{Timestamp: start, Reason: "normal"},
+				{Timestamp: start.Add(45 * time.Minute), Paused: true}, // 15 mins paused (activeFraction = 0.75)
+			}
+		})
+		// 10kWh discharged: 5kWh storm (ignored), 5kWh active.
+		// Paused fraction: 15 mins = 2.5kWh.
+		// Total ignored is max(2.5, 5) = 5kWh, so effBatteryToHome is 10 - 5 = 5kWh (not double discounted to 3.75kWh).
+		// Avoided: 5kWh * $0.20 = $1.00
+		// ChargingCost: 5kWh * $0.10 = $0.50
+		// BatterySavings: $0.50
+		assert.InDelta(t, 1.00, savings.AvoidedCost, 0.001, "AvoidedCost mismatch")
+		assert.InDelta(t, 0.50, savings.ChargingCost, 0.001, "ChargingCost mismatch")
+		assert.InDelta(t, 0.50, savings.BatterySavings, 0.001, "BatterySavings mismatch")
+	})
+
 	t.Run("Solar Savings", func(t *testing.T) {
 		savings := runTest(t, func(m *mockSavingsStorage) {
 			m.prices = []types.Price{

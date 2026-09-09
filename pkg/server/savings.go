@@ -401,9 +401,11 @@ func (s *Server) getSiteSavings(ctx context.Context, siteID string, start, end t
 
 			// Calculate performance metrics by subtracting ignored volume from raterudder's results.
 			// We subtract ignored volume from both used and to-home (conservative assumption).
-			ignoredUsedForHome := math.Min(subStat.BatteryToHomeKWH, ignoredDischargeKWH)
-			effBatteryToHome := (subStat.BatteryToHomeKWH - ignoredUsedForHome) * activeFraction
-			effBatteryUsed := (subStat.BatteryUsedKWH - ignoredDischargeKWH) * activeFraction
+			totalIgnoredHome := math.Max(subStat.BatteryToHomeKWH*ignoredFraction, math.Min(subStat.BatteryToHomeKWH, ignoredDischargeKWH))
+			effBatteryToHome := math.Max(0, subStat.BatteryToHomeKWH-totalIgnoredHome)
+
+			totalIgnoredUsed := math.Max(subStat.BatteryUsedKWH*ignoredFraction, ignoredDischargeKWH)
+			effBatteryUsed := math.Max(0, subStat.BatteryUsedKWH-totalIgnoredUsed)
 
 			// Calculate charging cost for home based on the active (non-ignored) portion.
 			chargingCostForHome := 0.0
