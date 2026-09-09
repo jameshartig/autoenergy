@@ -442,8 +442,10 @@ describe('NotificationModal', () => {
 
         await waitFor(() => {
             expect(screen.getByLabelText('Morning Summary Delivery Time')).toBeInTheDocument();
+            expect(screen.getByLabelText('Morning Summary Delivery Time')).toHaveTextContent('7:00 AM');
             expect(screen.getByLabelText('Morning Summary Flavor')).toBeInTheDocument();
             expect(screen.getByLabelText('Evening Summary Delivery Time')).toBeInTheDocument();
+            expect(screen.getByLabelText('Evening Summary Delivery Time')).toHaveTextContent('8:00 PM');
             expect(screen.getByLabelText('Evening Summary Flavor')).toBeInTheDocument();
             expect(screen.getAllByText('Preview on Device').length).toBe(2);
         });
@@ -575,5 +577,154 @@ describe('NotificationModal', () => {
             expect(screen.queryByText(/morning summary flavor is required/i)).not.toBeInTheDocument();
         });
     });
-});
 
+    it('shows iOS Safari guidance with share icon and hides browser toggle when on iOS in browser', async () => {
+        vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
+        delete (window as any).Notification;
+        delete (window as any).PushManager;
+        window.matchMedia = vi.fn().mockImplementation((query) => ({
+            matches: false,
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+        }));
+        Object.defineProperty(navigator, 'standalone', { value: false, configurable: true });
+
+        (api.fetchNotificationSettings as any).mockResolvedValue({
+            settings: {
+                morningSummaryEnabled: false,
+                morningSummaryHour: 7,
+                morningSummaryFlavor: 'home_planner',
+                eveningSummaryEnabled: false,
+                eveningSummaryHour: 20,
+                eveningSummaryFlavor: 'home_planner',
+            },
+            subscriptions: [],
+            vapidEnabled: true,
+        });
+
+        render(
+            <NotificationModal
+                open={true}
+                onClose={mockOnClose}
+                siteID={mockSiteID}
+                siteName={mockSiteName}
+            />
+        );
+
+        await waitFor(() => {
+            const banner = screen.getByText('iOS Safari Push Setup').closest('.notification-banner-content');
+            expect(banner).toBeInTheDocument();
+            expect(banner).toHaveTextContent(/three-dot menu \(⋯\)/);
+            expect(banner).toHaveTextContent(/Share/);
+            expect(banner).toHaveTextContent(/View More/);
+            expect(banner).toHaveTextContent(/Add to Home Screen/);
+            expect(screen.getByLabelText('Share')).toBeInTheDocument();
+
+            // Toggle should not be rendered
+            expect(screen.queryByText(/Deliver notifications to this browser/i)).not.toBeInTheDocument();
+
+            // Empty device guidance
+            expect(screen.getByText(/Add RateRudder to your Home Screen to register this device/i)).toBeInTheDocument();
+            expect(screen.getByText('Add to Home Screen to get started')).toBeInTheDocument();
+        });
+    });
+
+    it('hides iOS guidance banner and shows browser toggle when installed as an iOS standalone PWA', async () => {
+        vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
+        window.matchMedia = vi.fn().mockImplementation((query) => ({
+            matches: query === '(display-mode: standalone)',
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+        }));
+        Object.defineProperty(navigator, 'standalone', { value: true, configurable: true });
+
+        (api.fetchNotificationSettings as any).mockResolvedValue({
+            settings: {
+                morningSummaryEnabled: false,
+                morningSummaryHour: 7,
+                morningSummaryFlavor: 'home_planner',
+                eveningSummaryEnabled: false,
+                eveningSummaryHour: 20,
+                eveningSummaryFlavor: 'home_planner',
+            },
+            subscriptions: [],
+            vapidEnabled: true,
+        });
+
+        render(
+            <NotificationModal
+                open={true}
+                onClose={mockOnClose}
+                siteID={mockSiteID}
+                siteName={mockSiteName}
+            />
+        );
+
+        await waitFor(() => {
+            expect(screen.queryByText('iOS Safari Push Setup')).not.toBeInTheDocument();
+            expect(screen.getByText(/Deliver notifications to this browser/i)).toBeInTheDocument();
+        });
+    });
+
+    it('shows warning banner and hides toggle when push notifications are unsupported in browser', async () => {
+        delete (window as any).PushManager;
+
+        (api.fetchNotificationSettings as any).mockResolvedValue({
+            settings: {},
+            subscriptions: [],
+            vapidEnabled: true,
+        });
+
+        render(
+            <NotificationModal
+                open={true}
+                onClose={mockOnClose}
+                siteID={mockSiteID}
+                siteName={mockSiteName}
+            />
+        );
+
+        await waitFor(() => {
+            expect(screen.getByTestId('push-unsupported-banner')).toBeInTheDocument();
+            expect(screen.getByText('Push notifications are not supported in this browser.')).toBeInTheDocument();
+            expect(screen.queryByText(/Deliver notifications to this browser/i)).not.toBeInTheDocument();
+            expect(screen.getByText('Push notifications unsupported')).toBeInTheDocument();
+        });
+    });
+
+    it('shows warning banner and hides iOS guide when push is unsupported on iOS (missing serviceWorker)', async () => {
+        vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)');
+        delete (navigator as any).serviceWorker;
+
+        (api.fetchNotificationSettings as any).mockResolvedValue({
+            settings: {},
+            subscriptions: [],
+            vapidEnabled: true,
+        });
+
+        render(
+            <NotificationModal
+                open={true}
+                onClose={mockOnClose}
+                siteID={mockSiteID}
+                siteName={mockSiteName}
+            />
+        );
+
+        await waitFor(() => {
+            expect(screen.getByTestId('push-unsupported-banner')).toBeInTheDocument();
+            expect(screen.queryByText('iOS Safari Push Setup')).not.toBeInTheDocument();
+            expect(screen.queryByText(/Deliver notifications to this browser/i)).not.toBeInTheDocument();
+        });
+    });
+});

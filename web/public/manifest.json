@@ -1,7 +1,7 @@
 {
   "name": "RateRudder",
   "short_name": "RateRudder",
-  "start_url": "/",
+  "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#0B0F19",
   "theme_color": "#0B0F19",

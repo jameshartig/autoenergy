@@ -9,7 +9,8 @@ import {
     extractOffsetMinutes,
     formatTimeInOffset,
     getActionTimestamp,
-    isZeroTime
+    isZeroTime,
+    formatHour12
 } from './dashboardUtils';
 import { BatteryMode, SolarMode, ActionReason, type Action } from '../api';
 
@@ -309,6 +310,20 @@ describe('dashboardUtils', () => {
             const targetTs = getActionTimestamp(action);
             expect(targetTs).toBe('2026-07-22T04:09:26.947167547Z');
             expect(formatTime(targetTs, refTs)).toBe('12:09 AM');
+        });
+    });
+
+    describe('formatHour12', () => {
+        it('formats midnight and midday correctly', () => {
+            expect(formatHour12(0)).toBe('12:00 AM');
+            expect(formatHour12(12)).toBe('12:00 PM');
+        });
+
+        it('formats morning and evening hours in 12-hour time without leading zeros', () => {
+            expect(formatHour12(7)).toBe('7:00 AM');
+            expect(formatHour12(13)).toBe('1:00 PM');
+            expect(formatHour12(20)).toBe('8:00 PM');
+            expect(formatHour12(23)).toBe('11:00 PM');
         });
     });
 });

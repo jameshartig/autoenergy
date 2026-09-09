@@ -16,6 +16,8 @@ import {
     type AnomalyAlertSensitivity
 } from '../api';
 import { HelpButton } from './HelpButton';
+import { isIOSDevice, hasNotificationSupport, isPushSupportedInBrowser } from '../utils/pwaUtils';
+import { formatHour12 } from '../utils/dashboardUtils';
 import './NotificationModal.css';
 
 interface NotificationModalProps {
@@ -177,11 +179,10 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
     const hasAnyDeviceConnected = isSubscribedLocally || subscriptions.length > 0;
 
-    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isStandalone = typeof window !== 'undefined' && (
-        (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
-        (navigator as any).standalone === true
-    );
+    const isIOS = isIOSDevice();
+    const hasNotifications = hasNotificationSupport();
+    const isPushSupported = isPushSupportedInBrowser();
+    const isIOSWithoutNotifications = isIOS && isPushSupported && !hasNotifications;
 
     const checkLocalSubscription = useCallback(async (knownSubscriptions?: PushSubscription[]) => {
         if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
@@ -257,8 +258,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     }, [open, loadSettings]);
 
     const handleToggleLocalPush = async (checked: boolean) => {
-        if (typeof Notification === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-            setError('Push notifications are not supported in this browser.');
+        if (!isPushSupported || !hasNotifications) {
             return;
         }
 
@@ -471,13 +471,41 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                             </div>
                         ) : (
                             <>
+                                {/* Push Notifications Unsupported Warning */}
+                                {!isPushSupported && (
+                                    <div className="notification-banner warning" data-testid="push-unsupported-banner">
+                                        <span className="notification-banner-icon" aria-hidden="true">⚠️</span>
+                                        <div className="notification-banner-content">
+                                            <strong>Push Notifications Unsupported</strong>
+                                            Push notifications are not supported in this browser.
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* iOS Safari Guidance Banner */}
-                                {isIOS && !isStandalone && (
+                                {isIOSWithoutNotifications && (
                                     <div className="notification-banner info">
                                         <span className="notification-banner-icon" aria-hidden="true">📱</span>
                                         <div className="notification-banner-content">
                                             <strong>iOS Safari Push Setup</strong>
-                                            To receive notifications on your iPhone or iPad, tap <strong>Share ⎋</strong> and select <strong>&quot;Add to Home Screen&quot;</strong>, then open RateRudder from your Home Screen.
+                                            To receive notifications on your iPhone or iPad, tap the three-dot menu (⋯), tap <strong>Share</strong>{' '}
+                                            <svg
+                                                width="15"
+                                                height="15"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                aria-label="Share"
+                                                style={{ display: 'inline-block', verticalAlign: '-2px', margin: '0 2px' }}
+                                            >
+                                                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                                                <polyline points="16 6 12 2 8 6" />
+                                                <line x1="12" y1="2" x2="12" y2="15" />
+                                            </svg>
+                                            , tap <strong>&quot;View More&quot;</strong>, then select <strong>&quot;Add to Home Screen&quot;</strong>. Then open RateRudder from your Home Screen.
                                         </div>
                                     </div>
                                 )}
@@ -501,26 +529,28 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
                                 {/* Zone A: Device Management */}
                                 <div className="notif-section">
-                                    <Field.Root className="form-group switch-group" style={{ marginBottom: 0 }}>
-                                        <div className="switch-row">
-                                            <Switch.Root
-                                                id="pushNotificationsToggle"
-                                                checked={isSubscribedLocally}
-                                                onCheckedChange={handleToggleLocalPush}
-                                                disabled={saving}
-                                                className="switch-root"
-                                                aria-label="Deliver notifications to this browser"
-                                            >
-                                                <Switch.Thumb className="switch-thumb" />
-                                            </Switch.Root>
-                                            <Field.Label htmlFor="pushNotificationsToggle" style={{ cursor: 'pointer', fontWeight: 600 }}>
-                                                Deliver notifications to this browser
-                                            </Field.Label>
-                                        </div>
-                                        <Field.Description>
-                                            Receive daily summaries and critical grid alerts on this device.
-                                        </Field.Description>
-                                    </Field.Root>
+                                    {isPushSupported && !isIOSWithoutNotifications && (
+                                        <Field.Root className="form-group switch-group" style={{ marginBottom: 0 }}>
+                                            <div className="switch-row">
+                                                <Switch.Root
+                                                    id="pushNotificationsToggle"
+                                                    checked={isSubscribedLocally}
+                                                    onCheckedChange={handleToggleLocalPush}
+                                                    disabled={saving}
+                                                    className="switch-root"
+                                                    aria-label="Deliver notifications to this browser"
+                                                >
+                                                    <Switch.Thumb className="switch-thumb" />
+                                                </Switch.Root>
+                                                <Field.Label htmlFor="pushNotificationsToggle" style={{ cursor: 'pointer', fontWeight: 600 }}>
+                                                    Deliver notifications to this browser
+                                                </Field.Label>
+                                            </div>
+                                            <Field.Description>
+                                                Receive daily summaries and critical grid alerts on this device.
+                                            </Field.Description>
+                                        </Field.Root>
+                                    )}
 
                                     <div>
                                         <Field.Root className="form-group" style={{ marginBottom: '0.35rem' }}>
@@ -531,7 +561,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
                                         {subscriptions.length === 0 ? (
                                             <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                                No devices registered yet. Enable notifications above to register this browser.
+                                                {!isPushSupported
+                                                    ? 'No devices registered yet. Access RateRudder from a supported browser to register for notifications.'
+                                                    : isIOSWithoutNotifications
+                                                    ? 'No devices registered yet. Add RateRudder to your Home Screen to register this device.'
+                                                    : 'No devices registered yet. Enable notifications above to register this browser.'}
                                             </div>
                                         ) : (
                                             <div className="device-list">
@@ -540,7 +574,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                         <div className="device-info">
                                                             <span className="device-name">{getDeviceName(sub.userAgent)}</span>
                                                             <span className="device-date">
-                                                                Added {sub.tsCreated ? new Date(sub.tsCreated).toLocaleDateString() : 'recently'}
+                                                                 Added {sub.tsCreated ? new Date(sub.tsCreated).toLocaleDateString() : 'recently'}
                                                             </span>
                                                         </div>
                                                         <button
@@ -563,8 +597,20 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                     <div className="notif-connect-prompt">
                                         <span className="notif-prompt-icon">🔔</span>
                                         <div className="notif-prompt-text">
-                                            <strong>Connect this browser above</strong>
-                                            <p>Enable push notifications on this device to customize daily morning summaries, evening wrap-ups, and real-time energy alerts.</p>
+                                            <strong>
+                                                {!isPushSupported
+                                                    ? 'Push notifications unsupported'
+                                                    : isIOSWithoutNotifications
+                                                    ? 'Add to Home Screen to get started'
+                                                    : 'Connect this browser above'}
+                                            </strong>
+                                            <p>
+                                                {!isPushSupported
+                                                    ? 'This browser does not support Web Push notifications. Use a supported browser or install to your Home Screen on iOS to enable alerts.'
+                                                    : isIOSWithoutNotifications
+                                                    ? 'Follow the steps above to add RateRudder to your Home Screen to receive morning summaries, evening wrap-ups, and real-time energy alerts.'
+                                                    : 'Enable push notifications on this device to customize daily morning summaries, evening wrap-ups, and real-time energy alerts.'}
+                                            </p>
                                         </div>
                                     </div>
                                 ) : (
@@ -620,7 +666,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                             >
                                                                 <Select.Trigger className="select-trigger" id="morningSummaryHour" aria-label="Morning Summary Delivery Time">
                                                                     <Select.Value>
-                                                                        {String(draftSettings.morningSummaryHour ?? 7).padStart(2, '0')}:00 { (draftSettings.morningSummaryHour ?? 7) >= 12 ? 'PM' : 'AM' }
+                                                                        {formatHour12(draftSettings.morningSummaryHour ?? 7)}
                                                                     </Select.Value>
                                                                     <Select.Icon style={{ display: 'flex', alignItems: 'center' }}>
                                                                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -632,15 +678,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                                     <Select.Positioner className="select-positioner">
                                                                         <Select.Popup className="select-popup">
                                                                             <Select.List>
-                                                                                {Array.from({ length: 24 }, (_, i) => {
-                                                                                    const displayHour = i === 0 ? 12 : i > 12 ? i - 12 : i;
-                                                                                    const ampm = i >= 12 ? 'PM' : 'AM';
-                                                                                    return (
-                                                                                        <Select.Item key={i} className="select-item" value={String(i)}>
-                                                                                            <Select.ItemText>{displayHour}:00 {ampm}</Select.ItemText>
-                                                                                        </Select.Item>
-                                                                                    );
-                                                                                })}
+                                                                                {Array.from({ length: 24 }, (_, i) => (
+                                                                                    <Select.Item key={i} className="select-item" value={String(i)}>
+                                                                                        <Select.ItemText>{formatHour12(i)}</Select.ItemText>
+                                                                                    </Select.Item>
+                                                                                ))}
                                                                             </Select.List>
                                                                         </Select.Popup>
                                                                     </Select.Positioner>
@@ -674,7 +716,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                             >
                                                                 <Select.Trigger className="select-trigger" id="morningSummaryFlavor" aria-label="Morning Summary Flavor">
                                                                     <Select.Value>
-                                                                        {flavorPreviews[currentFlavor]?.name || 'Metrics Heavy'}
+                                                                        {flavorPreviews[currentFlavor]?.name || 'Home Planner'}
                                                                     </Select.Value>
                                                                     <Select.Icon style={{ display: 'flex', alignItems: 'center' }}>
                                                                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -760,7 +802,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                             >
                                                                 <Select.Trigger className="select-trigger" id="eveningSummaryHour" aria-label="Evening Summary Delivery Time">
                                                                     <Select.Value>
-                                                                        {String(draftSettings.eveningSummaryHour ?? 20).padStart(2, '0')}:00 { (draftSettings.eveningSummaryHour ?? 20) >= 12 ? 'PM' : 'AM' }
+                                                                        {formatHour12(draftSettings.eveningSummaryHour ?? 20)}
                                                                     </Select.Value>
                                                                     <Select.Icon style={{ display: 'flex', alignItems: 'center' }}>
                                                                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -772,15 +814,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                                     <Select.Positioner className="select-positioner">
                                                                         <Select.Popup className="select-popup">
                                                                             <Select.List>
-                                                                                {Array.from({ length: 24 }, (_, i) => {
-                                                                                    const displayHour = i === 0 ? 12 : i > 12 ? i - 12 : i;
-                                                                                    const ampm = i >= 12 ? 'PM' : 'AM';
-                                                                                    return (
-                                                                                        <Select.Item key={i} className="select-item" value={String(i)}>
-                                                                                            <Select.ItemText>{displayHour}:00 {ampm}</Select.ItemText>
-                                                                                        </Select.Item>
-                                                                                    );
-                                                                                })}
+                                                                                {Array.from({ length: 24 }, (_, i) => (
+                                                                                    <Select.Item key={i} className="select-item" value={String(i)}>
+                                                                                        <Select.ItemText>{formatHour12(i)}</Select.ItemText>
+                                                                                    </Select.Item>
+                                                                                ))}
                                                                             </Select.List>
                                                                         </Select.Popup>
                                                                     </Select.Positioner>
@@ -814,7 +852,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                                                             >
                                                                 <Select.Trigger className="select-trigger" id="eveningSummaryFlavor" aria-label="Evening Summary Flavor">
                                                                     <Select.Value>
-                                                                        {eveningFlavorPreviews[currentEveningFlavor]?.name || 'Metrics Heavy'}
+                                                                        {eveningFlavorPreviews[currentEveningFlavor]?.name || 'Home Planner'}
                                                                     </Select.Value>
                                                                     <Select.Icon style={{ display: 'flex', alignItems: 'center' }}>
                                                                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">

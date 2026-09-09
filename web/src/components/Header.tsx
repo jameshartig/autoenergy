@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useLocation, useSearchParams } from 'wouter';
 import { Select } from '@base-ui/react/select';
 import { NotificationModal } from './NotificationModal';
+import { isIOSHomeScreen } from '../utils/pwaUtils';
 import './Header.css';
 import type { UserSite } from '../api';
 
@@ -19,7 +20,7 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, sites, selectedSiteID, onSite
     const [location] = useLocation();
     const [searchParams] = useSearchParams();
 
-    const showNotifications = searchParams.get('notifications') === 'true';
+    const showNotifications = searchParams.get('notifications') === 'true' || isIOSHomeScreen();
 
     const currentSite = sites.find(s => s.id === selectedSiteID) || (sites.length > 0 ? sites[0] : undefined);
     const activeSiteID = currentSite?.id;

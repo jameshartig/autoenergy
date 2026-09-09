@@ -334,19 +334,26 @@ textarea:focus-visible,
   left: 50%;
   transform: translate(-50%, -50%);
   width: 90%;
-  max-width: 500px;
+  max-width: 600px;
   max-height: 90vh;
   overflow-y: auto;
   background: var(--surface-container-low);
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius-lg);
-  padding: 2.25rem 2.5rem;
+  padding: 2rem;
   z-index: 2001;
   box-shadow: var(--shadow-lg), 0 0 40px rgba(0, 0, 0, 0.5);
   animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .dialog-popup {
+    padding: 1.25rem 1.5rem;
+    width: 95%;
+  }
 }
 
 .dialog-title {

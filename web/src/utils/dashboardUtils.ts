@@ -97,6 +97,13 @@ export const formatTime = (ts?: string, referenceTs?: string): string => {
     return formatTimeInOffset(ts, offset);
 };
 
+export const formatHour12 = (hour: number): string => {
+    const h = ((hour % 24) + 24) % 24;
+    const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${displayHour}:00 ${ampm}`;
+};
+
 // gridChargeCost returns the effective grid charging cost (base price + delivery adder).
 export const gridChargeCost = (price: { dollarsPerKWH: number; gridUseDollarsPerKWH?: number }): number =>
     price.dollarsPerKWH + (price.gridUseDollarsPerKWH ?? 0);

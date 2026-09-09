@@ -2,11 +2,15 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import Header from './Header';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('Header Component', () => {
     const mockOnSiteChange = vi.fn();
     const mockOnLogout = vi.fn();
+
+    beforeEach(() => {
+        vi.restoreAllMocks();
+    });
 
     const renderHeader = (path: string, loggedIn: boolean) => {
         const { hook } = memoryLocation({ static: true, path: path });
@@ -112,6 +116,14 @@ describe('Header Component', () => {
 
     it('renders notification bell when ?notifications=true is in the query params', () => {
         renderHeader('/dashboard?notifications=true', true);
+        expect(screen.getByTestId('header-bell-btn')).toBeInTheDocument();
+    });
+
+    it('renders notification bell when on iOS home screen even without query params', () => {
+        vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
+        (window as any).Notification = { permission: 'default' };
+
+        renderHeader('/dashboard', true);
         expect(screen.getByTestId('header-bell-btn')).toBeInTheDocument();
     });
 
