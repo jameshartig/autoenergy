@@ -31,14 +31,14 @@ const flavorPreviews: Record<MorningSummaryFlavor, { name: string; desc: string;
     metrics_heavy: {
         name: 'Metrics Heavy',
         desc: 'Comprehensive data with SOC kWh, solar percentage comparison, and full-charge ETA.',
-        title: '🔋 74% SOC (10.1 kWh) • ☀️ 38.4 kWh Solar (+15% vs yesterday)',
-        body: '⚡ Battery was refilled from solar yesterday. Full charge expected by 1:15 PM.'
+        title: '🔋 74% SOC (10.1 kWh) • ☀️ 38.4 kWh Solar',
+        body: 'Forecast: +15% vs yesterday. Full charge expected by 1:15 PM.'
     },
     home_planner: {
         name: 'Home Planner',
-        desc: 'Actionable schedule advice with prime appliance & EV charging windows.',
+        desc: 'Clear solar outlook and battery expectations for the day.',
         title: '☀️ Great Solar Day Ahead',
-        body: 'Full battery expected by 1:15 PM. Prime window for EV charging & chores: 11:00 AM – 3:30 PM.'
+        body: 'Battery at 74%. Full battery expected by 1:15 PM.'
     },
     executive: {
         name: 'Executive Summary',
@@ -50,7 +50,7 @@ const flavorPreviews: Record<MorningSummaryFlavor, { name: string; desc: string;
         name: 'Autonomous Pilot',
         desc: 'Real-time reasoning from RateRudder explaining how the battery is being automated.',
         title: '🤖 RateRudder: Morning Outlook',
-        body: 'Battery at 74%. Forecast shows 38.0 kWh solar refilling battery by 1:15 PM. Optimizing daytime solar self-consumption.'
+        body: 'Battery at 74%. Forecast shows 38.0 kWh solar refilling battery by 1:15 PM. Optimizing daytime self-consumption.'
     }
 };
 
@@ -59,11 +59,11 @@ const eveningFlavorPreviews: Record<EveningSummaryFlavor, { name: string; desc: 
         name: 'Metrics Heavy',
         desc: 'Complete totals for the day: generation, consumption, grid export, and battery reserve.',
         title: '🌙 38.4 kWh Solar • 🔋 85% SOC (11.6 kWh)',
-        body: 'Today: 38.4 kWh generated, 22.1 kWh consumed, 12.0 kWh exported. Battery reserve: 11.6 kWh.'
+        body: 'Today: 38.4 kWh solar, 22.1 kWh home (12.0 kWh exported). Battery: 11.6 kWh powers home through sunrise.'
     },
     home_planner: {
         name: 'Home Planner',
-        desc: 'Overnight outlook indicating battery preparedness and advice on evening consumption.',
+        desc: 'Actionable evening status on how long the battery will last overnight.',
         title: '🌙 Evening Energy Wrap-up',
         body: 'Battery at 85% (11.6 kWh). Projected to supply home until ~1:15 AM before drawing from the grid.'
     },
@@ -75,9 +75,9 @@ const eveningFlavorPreviews: Record<EveningSummaryFlavor, { name: string; desc: 
     },
     pilot: {
         name: 'Autonomous Pilot',
-        desc: 'Summary of automation actions taken during peak hours and overnight transition.',
+        desc: 'Real-time explanation of nighttime battery strategy and grid switchover projection.',
         title: '🤖 RateRudder: Evening Wrap-up',
-        body: 'Automated battery protected peak hours: 38.4 kWh solar generated, 12.0 kWh exported. Switching to overnight self-consumption mode.'
+        body: 'Automated battery managed 38.4 kWh solar today. Stored 11.6 kWh projected to power home through sunrise.'
     }
 };
 

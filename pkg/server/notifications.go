@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,23 +47,37 @@ const (
 	// Deduplication window for VPP dispatches (allows separate morning/evening events).
 	vppDispatchDeduplicationWindow = 5 * time.Hour
 
-	// Deduplication window for price spikes (suppresses repeated alerts during prolonged multi-hour spikes while allowing distinct daily afternoon events).
-	priceSpikeDeduplicationWindow = 18 * time.Hour
+	// Minimum battery SOC increase (%) required to mention a projected peak in the morning summary.
+	morningSummaryMinPeakDeltaSOC = 5.0
+
+	// Multiplier for price surge to be considered a significant change (at least 20% higher than previous alert).
+	priceSpikeSignificantMultiplier = 1.20
+
+	// Escalated percentile tiers required for re-alerting within 1-6 hours on significant change.
+	// Within 1 to 6 hours of a previous alert, a new alert is only sent if the price is at least 20%
+	// higher than the previous alerted peak price AND meets these higher percentile thresholds.
+	priceSpikeEscalatedPercentileLow    = 0.98 // Top 2% of all hours
+	priceSpikeEscalatedPercentileMedium = 0.95 // Top 5% of all hours
+	priceSpikeEscalatedPercentileHigh   = 0.95 // Top 5% of all hours
 
 	// Minimum absolute price ($/kWh) before any price spike alert can trigger.
+	// Prevents alerts during extremely cheap periods (e.g., prices jumping from 2¢ to 4¢/kWh).
 	priceSpikeAbsoluteFloorDollarsPerKWH = 0.18
 
-	// Minimum delta ($/kWh) upcoming price must exceed reference price to be considered a spike.
-	// Low sensitivity alerts only on large surges ($0.10/kWh); High sensitivity alerts on moderate surges ($0.03/kWh).
+	// Minimum delta ($/kWh) that upcoming price must exceed the reference price to be considered a spike.
+	// Low sensitivity alerts only on large surges ($0.10/kWh above reference);
+	// Medium alerts on moderate surges ($0.05/kWh); High alerts on smaller surges ($0.03/kWh).
 	priceSpikeMinDeltaLow    = 0.10
 	priceSpikeMinDeltaMedium = 0.05
 	priceSpikeMinDeltaHigh   = 0.03
 
-	// Percentile of recent 3-5 day prices required to trigger a price spike.
-	// Low sensitivity requires 95th percentile; High sensitivity requires 80th percentile.
+	// Percentile of historical prices required to qualify as a price spike:
+	// - High sensitivity: Top 10% (0.90) of all-hours alone (no time-of-day restriction; alerts whenever price is high).
+	// - Medium sensitivity: Top 10% (0.90) of all-hours AND time-of-day relative (+/- 1 hour buffer).
+	// - Low sensitivity: Top 5% (0.95) of all-hours AND time-of-day relative (+/- 1 hour buffer).
 	priceSpikePercentileLow    = 0.95
 	priceSpikePercentileMedium = 0.90
-	priceSpikePercentileHigh   = 0.80
+	priceSpikePercentileHigh   = 0.90
 
 	// Minimum weather forecast solar (kW) required before solar underproduction is evaluated.
 	solarUnderproductionMinForecastKW = 3.0
@@ -123,10 +138,14 @@ func generateMorningSummary(
 	yesterdayActualKWH float64,
 	peakSolarKWH float64,
 	hitCapacityAt time.Time,
+	projectedPeakSOC float64,
 	timeLoc *time.Location,
 ) (string, string) {
 	if timeLoc == nil {
 		timeLoc = time.UTC
+	}
+	if projectedPeakSOC <= 0 {
+		projectedPeakSOC = currentStatus.BatterySOC
 	}
 
 	currentEnergyKWH := currentStatus.BatterySOC * currentStatus.BatteryCapacityKWH / 100.0
@@ -176,9 +195,21 @@ func generateMorningSummary(
 		}
 
 		if hitCapacityStr != "" {
-			body = fmt.Sprintf("Battery at %.0f%%. Full battery expected by %s. Prime window for EV charging & chores: 11:00 AM – 3:30 PM.", currentStatus.BatterySOC, hitCapacityStr)
+			body = fmt.Sprintf("Battery at %.0f%%. Full battery expected by %s.", currentStatus.BatterySOC, hitCapacityStr)
+		} else if solarRatio >= 0.80 {
+			if projectedPeakSOC >= currentStatus.BatterySOC+morningSummaryMinPeakDeltaSOC {
+				body = fmt.Sprintf("Battery at %.0f%% (peaking ~%.0f%%). Strong solar today (%s) will help cover daytime home usage.", currentStatus.BatterySOC, projectedPeakSOC, relWording)
+			} else {
+				body = fmt.Sprintf("Battery at %.0f%%. Strong solar today (%s) will help cover daytime home usage.", currentStatus.BatterySOC, relWording)
+			}
+		} else if solarRatio >= 0.45 {
+			if projectedPeakSOC >= currentStatus.BatterySOC+morningSummaryMinPeakDeltaSOC {
+				body = fmt.Sprintf("Battery at %.0f%% (peaking ~%.0f%%). Moderate solar expected today (%s).", currentStatus.BatterySOC, projectedPeakSOC, relWording)
+			} else {
+				body = fmt.Sprintf("Battery at %.0f%%. Moderate solar expected today (%s); solar will help cover baseline load.", currentStatus.BatterySOC, relWording)
+			}
 		} else {
-			body = fmt.Sprintf("Battery at %.0f%%. Solar will be limited today (%s). Consider shifting heavy appliance usage.", currentStatus.BatterySOC, relWording)
+			body = fmt.Sprintf("Battery at %.0f%%. Solar will be limited today (%s). Consider avoiding heavy loads.", currentStatus.BatterySOC, relWording)
 		}
 		return title, body
 
@@ -186,9 +217,15 @@ func generateMorningSummary(
 		title := fmt.Sprintf("☀️ %.1f kWh Solar Expected • 🔋 %.0f%% SOC", todayForecastKWH, currentStatus.BatterySOC)
 		var body string
 		if hitCapacityStr != "" {
-			body = fmt.Sprintf("Great solar today; battery will fully top off by %s.", hitCapacityStr)
+			if solarRatio >= 0.70 {
+				body = fmt.Sprintf("Great solar today; battery will fully top off by %s.", hitCapacityStr)
+			} else {
+				body = fmt.Sprintf("Battery will reach full charge by %s (%s).", hitCapacityStr, relWording)
+			}
+		} else if projectedPeakSOC >= currentStatus.BatterySOC+morningSummaryMinPeakDeltaSOC {
+			body = fmt.Sprintf("Solar expected: %.1f kWh (%s). Battery projected to reach ~%.0f%%.", todayForecastKWH, relWording, projectedPeakSOC)
 		} else {
-			body = fmt.Sprintf("Solar limited today (%s); battery will supply home without full recharge.", relWording)
+			body = fmt.Sprintf("Solar limited today (%s); battery will supply home without charging.", relWording)
 		}
 		return title, body
 
@@ -196,9 +233,11 @@ func generateMorningSummary(
 		title := "🤖 RateRudder: Morning Outlook"
 		var body string
 		if hitCapacityStr != "" {
-			body = fmt.Sprintf("Battery at %.0f%%. Forecast shows %.1f kWh solar refilling battery by %s. Optimizing daytime solar self-consumption.", currentStatus.BatterySOC, todayForecastKWH, hitCapacityStr)
+			body = fmt.Sprintf("Battery at %.0f%%. Forecast shows %.1f kWh solar refilling battery by %s. Optimizing daytime self-consumption.", currentStatus.BatterySOC, todayForecastKWH, hitCapacityStr)
+		} else if projectedPeakSOC >= currentStatus.BatterySOC+morningSummaryMinPeakDeltaSOC {
+			body = fmt.Sprintf("Battery at %.0f%% (peaking ~%.0f%%). Forecast shows %.1f kWh solar today. Optimizing self-consumption to defend peak hours.", currentStatus.BatterySOC, projectedPeakSOC, todayForecastKWH)
 		} else {
-			body = fmt.Sprintf("Battery at %.0f%%. Forecast shows %.1f kWh solar today. Managing battery reserve to defend peak pricing hours.", currentStatus.BatterySOC, todayForecastKWH)
+			body = fmt.Sprintf("Battery at %.0f%%. Solar limited (%.1f kWh). Preserving battery reserve to defend peak pricing hours.", currentStatus.BatterySOC, todayForecastKWH)
 		}
 		return title, body
 
@@ -209,8 +248,10 @@ func generateMorningSummary(
 		var body string
 		if hitCapacityStr != "" {
 			body = fmt.Sprintf("Forecast: %s. Full charge expected by %s.", relWording, hitCapacityStr)
+		} else if projectedPeakSOC >= currentStatus.BatterySOC+morningSummaryMinPeakDeltaSOC {
+			body = fmt.Sprintf("Forecast: %s. Battery projected to peak at ~%.0f%% today.", relWording, projectedPeakSOC)
 		} else {
-			body = fmt.Sprintf("Forecast: %s. Battery projected to peak at ~%.0f%% today.", relWording, currentStatus.BatterySOC)
+			body = fmt.Sprintf("Forecast: %s. Battery not projected to charge today (currently %.0f%%).", relWording, currentStatus.BatterySOC)
 		}
 		return title, body
 	}
@@ -223,6 +264,8 @@ func generateEveningSummary(
 	todayActualSolarKWH float64,
 	todayHomeUsageKWH float64,
 	todayGridExportKWH float64,
+	todayGridImportKWH float64,
+	minBatterySOC float64,
 	hitDeficitAt time.Time,
 	timeLoc *time.Location,
 ) (string, string) {
@@ -231,16 +274,25 @@ func generateEveningSummary(
 	}
 	currentEnergyKWH := currentStatus.BatterySOC * currentStatus.BatteryCapacityKWH / 100.0
 
+	var deficitStr string
+	if !hitDeficitAt.IsZero() {
+		deficitStr = hitDeficitAt.In(timeLoc).Format("3:04 PM")
+	}
+
+	reserveThreshold := minBatterySOC
+	if reserveThreshold <= 0 {
+		reserveThreshold = 20.0
+	}
+
 	switch flavor {
 	case "home_planner":
 		title := "🌙 Evening Energy Wrap-up"
 		var body string
 		if hitDeficitAt.IsZero() {
 			body = fmt.Sprintf("Battery at %.0f%% (%.1f kWh). Projected to power home through the night until tomorrow's solar.", currentStatus.BatterySOC, currentEnergyKWH)
-		} else if hitDeficitAt.Before(currentStatus.Timestamp.In(timeLoc).Add(30*time.Minute)) || currentStatus.BatterySOC <= 20.0 {
-			body = fmt.Sprintf("Battery at %.0f%% (%.1f kWh). Reserve is low; home will draw power from the grid tonight.", currentStatus.BatterySOC, currentEnergyKWH)
+		} else if currentStatus.BatterySOC <= reserveThreshold+2.0 || hitDeficitAt.Before(currentStatus.Timestamp.In(timeLoc).Add(30*time.Minute)) {
+			body = fmt.Sprintf("Battery at %.0f%% (%.1f kWh). Reserve is low; home will switch to grid power shortly.", currentStatus.BatterySOC, currentEnergyKWH)
 		} else {
-			deficitStr := hitDeficitAt.In(timeLoc).Format("3:04 PM")
 			body = fmt.Sprintf("Battery at %.0f%% (%.1f kWh). Projected to supply home until ~%s before drawing from the grid.", currentStatus.BatterySOC, currentEnergyKWH, deficitStr)
 		}
 		return title, body
@@ -250,8 +302,13 @@ func generateEveningSummary(
 		var body string
 		if todayGridExportKWH > 0.5 {
 			body = fmt.Sprintf("Solar generated %.1f kWh today with %.1f kWh exported to the grid. Battery entering night at %.0f%%.", todayActualSolarKWH, todayGridExportKWH, currentStatus.BatterySOC)
+		} else if todayHomeUsageKWH > 0 && todayActualSolarKWH >= todayHomeUsageKWH {
+			body = fmt.Sprintf("Solar generated %.1f kWh today, fully covering home needs. Battery entering night at %.0f%%.", todayActualSolarKWH, currentStatus.BatterySOC)
+		} else if todayHomeUsageKWH > 0 && todayActualSolarKWH > 0.5 {
+			coveragePct := (todayActualSolarKWH / todayHomeUsageKWH) * 100.0
+			body = fmt.Sprintf("Solar generated %.1f kWh today (covered %.0f%% of home use). Battery entering night at %.0f%%.", todayActualSolarKWH, coveragePct, currentStatus.BatterySOC)
 		} else {
-			body = fmt.Sprintf("Solar generated %.1f kWh today, covering home needs. Battery entering night at %.0f%%.", todayActualSolarKWH, currentStatus.BatterySOC)
+			body = fmt.Sprintf("Home used %.1f kWh today with minimal solar. Battery entering night at %.0f%%.", todayHomeUsageKWH, currentStatus.BatterySOC)
 		}
 		return title, body
 
@@ -259,10 +316,17 @@ func generateEveningSummary(
 		title := "🤖 RateRudder: Evening Wrap-up"
 		var body string
 		if hitDeficitAt.IsZero() {
-			body = fmt.Sprintf("Automated battery defended peak hours with %.1f kWh solar. Stored %.1f kWh projected to cover home through sunrise.", todayActualSolarKWH, currentEnergyKWH)
+			if todayActualSolarKWH >= 2.0 {
+				body = fmt.Sprintf("Automated battery managed %.1f kWh solar today. Stored %.1f kWh projected to power home through sunrise.", todayActualSolarKWH, currentEnergyKWH)
+			} else {
+				body = fmt.Sprintf("Battery maintained %.1f kWh reserve on a low solar day. Stored energy projected to power home through sunrise.", currentEnergyKWH)
+			}
 		} else {
-			deficitStr := hitDeficitAt.In(timeLoc).Format("3:04 PM")
-			body = fmt.Sprintf("Automated battery defended peak hours with %.1f kWh solar. Stored %.1f kWh entering overnight mode; reserve ETA ~%s.", todayActualSolarKWH, currentEnergyKWH, deficitStr)
+			if todayActualSolarKWH >= 2.0 {
+				body = fmt.Sprintf("Automated battery managed %.1f kWh solar today. Stored %.1f kWh will supply home until ~%s before switching to grid.", todayActualSolarKWH, currentEnergyKWH, deficitStr)
+			} else {
+				body = fmt.Sprintf("Stored %.1f kWh will supply home until ~%s before switching to grid.", currentEnergyKWH, deficitStr)
+			}
 		}
 		return title, body
 
@@ -271,10 +335,19 @@ func generateEveningSummary(
 	default:
 		title := fmt.Sprintf("🌙 %.1f kWh Solar • 🔋 %.0f%% SOC (%.1f kWh)", todayActualSolarKWH, currentStatus.BatterySOC, currentEnergyKWH)
 		var body string
+		var flowStr string
 		if todayGridExportKWH > 0.0 {
-			body = fmt.Sprintf("Today: %.1f kWh generated, %.1f kWh consumed, %.1f kWh exported. Battery reserve: %.1f kWh.", todayActualSolarKWH, todayHomeUsageKWH, todayGridExportKWH, currentEnergyKWH)
+			flowStr = fmt.Sprintf("Today: %.1f kWh solar, %.1f kWh home (%.1f kWh exported).", todayActualSolarKWH, todayHomeUsageKWH, todayGridExportKWH)
+		} else if todayGridImportKWH > 0.0 {
+			flowStr = fmt.Sprintf("Today: %.1f kWh solar, %.1f kWh home (%.1f kWh imported).", todayActualSolarKWH, todayHomeUsageKWH, todayGridImportKWH)
 		} else {
-			body = fmt.Sprintf("Today: %.1f kWh generated, %.1f kWh consumed. Battery reserve: %.1f kWh.", todayActualSolarKWH, todayHomeUsageKWH, currentEnergyKWH)
+			flowStr = fmt.Sprintf("Today: %.1f kWh solar, %.1f kWh home.", todayActualSolarKWH, todayHomeUsageKWH)
+		}
+
+		if hitDeficitAt.IsZero() {
+			body = fmt.Sprintf("%s Battery: %.1f kWh powers home through sunrise.", flowStr, currentEnergyKWH)
+		} else {
+			body = fmt.Sprintf("%s Battery: %.1f kWh powers home until ~%s.", flowStr, currentEnergyKWH, deficitStr)
 		}
 		return title, body
 	}
@@ -576,6 +649,85 @@ func (n *siteRecentNotifications) lastGridEvent() string {
 	return eventType
 }
 
+func (n *siteRecentNotifications) lastPriceSpikeLog(userID string) *types.NotificationLog {
+	var latest time.Time
+	var latestLog *types.NotificationLog
+	for i := range n.logs {
+		l := &n.logs[i]
+		if l.UserID == userID && l.Type == types.NotificationTypePriceSpike && l.Success {
+			if l.TSCreated.After(latest) {
+				latest = l.TSCreated
+				latestLog = l
+			}
+		}
+	}
+	return latestLog
+}
+
+func extractHighestAlertedPrice(l *types.NotificationLog) float64 {
+	if l == nil || len(l.Metadata) == 0 {
+		return 0
+	}
+	var maxP float64
+	if peakStr, ok := l.Metadata["peakPrice"]; ok && peakStr != "" {
+		if p, err := strconv.ParseFloat(peakStr, 64); err == nil && p > maxP {
+			maxP = p
+		}
+	}
+	if priceStr, ok := l.Metadata["price"]; ok && priceStr != "" {
+		if p, err := strconv.ParseFloat(priceStr, 64); err == nil && p > maxP {
+			maxP = p
+		}
+	}
+	return maxP
+}
+
+// priceDroppedBelowBetween checks if electricity prices dropped below spike threshold conditions
+// at any point between the previous alert timestamp (start) and the start of the candidate spike (end).
+//
+// If prices dropped back to normal levels in between, the user is eligible for a re-alert
+// after the 6-hour cooldown window. If prices remained continuously elevated without dropping below,
+// repeated alerts for the same ongoing elevated price event are suppressed until the next day (24h).
+func priceDroppedBelowBetween(
+	histPrices []types.Price,
+	start, end time.Time,
+	rawCosts []float64,
+	reqPercentile, minDelta float64,
+	useTimeOfDayRelative bool,
+	loc *time.Location,
+) bool {
+	if loc == nil {
+		loc = time.UTC
+	}
+	pctVal := computePricePercentile(rawCosts, reqPercentile)
+	medianCost := computePricePercentile(rawCosts, 0.50)
+	foundAny := false
+	for _, p := range histPrices {
+		if p.TSStart.After(start) && p.TSStart.Before(end) {
+			foundAny = true
+			cost := p.DollarsPerKWH + p.GridUseDollarsPerKWH
+			var ref float64
+			if useTimeOfDayRelative {
+				ref = computeTimeOfDayRefPrice(histPrices, p.TSStart, loc, medianCost)
+			} else {
+				ref = medianCost
+			}
+			// If at any hour the cost was below the absolute floor, below the percentile threshold,
+			// or failed to exceed the reference price by the required delta, it is considered dropped below.
+			if cost < priceSpikeAbsoluteFloorDollarsPerKWH || cost < pctVal || (cost-ref) < minDelta {
+				return true
+			}
+		}
+	}
+	// If no prices were found in the window, default to true to allow alerting
+	if !foundAny {
+		return true
+	}
+	return false
+}
+
+// computePricePercentile returns the p-th percentile value (e.g. p=0.90 for 90th percentile)
+// from a slice of prices using nearest-rank selection over a sorted copy.
 func computePricePercentile(prices []float64, p float64) float64 {
 	if len(prices) == 0 {
 		return 0
@@ -590,22 +742,70 @@ func computePricePercentile(prices []float64, p float64) float64 {
 	return sorted[idx]
 }
 
-func computeHourRefPrice(histPrices []types.Price, targetHour int, loc *time.Location, fallback float64) float64 {
-	var maxP float64
-	var found bool
+// computeTimeOfDayRefPrice calculates the typical baseline price for a target time of day,
+// using historical prices from previous days within a +/- 1 hour window.
+//
+// For example, if targetTime is 7:00 PM, this function inspects historical prices at 6:00 PM,
+// 7:00 PM, and 8:00 PM across past days. The +/- 1 hour buffer accounts for slight shifts in peak
+// hours, seasonal daylight changes, and Daylight Saving Time adjustments.
+//
+// We use the median (50th percentile) of this 3-hour window across previous days rather than the maximum:
+//  1. Normal recurring daily peaks around this time form the baseline (so regular daily peaks don't alert).
+//  2. An occasional past price spike in this window does NOT artificially inflate the baseline or poison
+//     future alerts (unlike a maximum, a few spike hours won't move the median).
+//  3. If there are no historical prices in this window, it gracefully falls back to the provided fallback
+//     (typically the all-hours median).
+func computeTimeOfDayRefPrice(histPrices []types.Price, targetTime time.Time, loc *time.Location, fallback float64) float64 {
+	if loc == nil {
+		loc = time.UTC
+	}
+	targetLocal := targetTime.In(loc)
+	targetHour := targetLocal.Hour()
+	targetY, targetM, targetD := targetLocal.Date()
+
+	// 3-hour window around targetHour (+/- 1 hour), with modulo 24 handling midnight wrap-around cleanly
+	prevHour := (targetHour + 23) % 24
+	nextHour := (targetHour + 1) % 24
+
+	var windowCosts []float64
 	for _, p := range histPrices {
-		if p.TSStart.In(loc).Hour() == targetHour {
+		pLocal := p.TSStart.In(loc)
+		pY, pM, pD := pLocal.Date()
+
+		// Only inspect previous days, never prices from the current target day
+		if pY == targetY && pM == targetM && pD == targetD {
+			continue
+		}
+
+		h := pLocal.Hour()
+		if h == prevHour || h == targetHour || h == nextHour {
 			cost := p.DollarsPerKWH + p.GridUseDollarsPerKWH
-			if !found || cost > maxP {
-				maxP = cost
-				found = true
-			}
+			windowCosts = append(windowCosts, cost)
 		}
 	}
-	if !found {
+
+	if len(windowCosts) == 0 {
 		return fallback
 	}
-	return maxP
+
+	// Use median of prices in this time window as the representative baseline
+	return computePricePercentile(windowCosts, 0.50)
+}
+
+// notificationTag returns the push notification tag for a given notification type and site.
+// Solar underproduction, grid outages, grid restored, and daily summaries share the primary
+// tag ("raterudder-" + siteID) so that alerts overwrite summaries on the user's device when
+// conditions change. Price spike and VPP dispatch alerts use distinct tags so they do not
+// overwrite summaries or each other.
+func notificationTag(notifType string, siteID string) string {
+	switch notifType {
+	case types.NotificationTypePriceSpike:
+		return "raterudder-" + siteID + "-price-spike"
+	case types.NotificationTypeVPPDispatch:
+		return "raterudder-" + siteID + "-vpp"
+	default:
+		return "raterudder-" + siteID
+	}
 }
 
 // dispatchPushToUser sends a push notification to all subscriptions of a user, handles dead subscription pruning, and logs.
@@ -618,6 +818,7 @@ func (s *Server) dispatchPushToUser(
 	title string,
 	body string,
 	urlPath string,
+	metadata map[string]string,
 ) {
 	nowUTC := s.now().UTC()
 	for _, sub := range user.Subscriptions {
@@ -625,13 +826,14 @@ func (s *Server) dispatchPushToUser(
 		payload := pushPayload{
 			Title: title,
 			Body:  body,
-			Tag:   "raterudder-" + siteID,
+			Tag:   notificationTag(notifType, siteID),
 			Icon:  "/logo_192.png",
 			Badge: "/badge_96.png",
 			Data: map[string]any{
-				"url":   urlPath,
-				"id":    logID,
-				"logID": logID,
+				"url":      urlPath,
+				"id":       logID,
+				"logID":    logID,
+				"metadata": metadata,
 			},
 		}
 
@@ -668,6 +870,7 @@ func (s *Server) dispatchPushToUser(
 			Success:    success,
 			StatusCode: statusCode,
 			Error:      errStr,
+			Metadata:   metadata,
 		}
 
 		if appendErr := s.storage.AppendNotificationLog(ctx, siteID, logEntry); appendErr != nil {
@@ -791,7 +994,9 @@ func (s *Server) handleNotifications(
 	wg.Wait()
 }
 
-// handleMorningSummaryNotifications evaluates and sends morning summary notifications.
+// handleMorningSummaryNotifications evaluates and sends morning summary push notifications.
+// It summarizes the day's solar production outlook, projected battery charging milestones (e.g.
+// full battery ETA), and provides tailored advice based on the user's chosen flavor.
 func (s *Server) handleMorningSummaryNotifications(
 	ctx context.Context,
 	site types.Site,
@@ -812,6 +1017,7 @@ func (s *Server) handleMorningSummaryNotifications(
 	todayEnd := todayStart.AddDate(0, 0, 1)
 
 	// Calculate historical daily solar totals for days strictly before today.
+	// Used to determine the historical peak solar generation day and yesterday's actual solar generation.
 	dailySolarMap := make(map[string]float64)
 	for _, day := range data.energyHistory {
 		if !day.TSDayStart.IsZero() {
@@ -832,7 +1038,8 @@ func (s *Server) handleMorningSummaryNotifications(
 		}
 	}
 
-	// Cold-start rule: if fewer than 3 days of historical data, do not generate morning summaries.
+	// Cold-start rule: if fewer than 3 days of historical data exist, do not generate morning summaries
+	// because baseline solar ratios and yesterday comparisons cannot be reliably computed.
 	if len(dailySolarMap) < 3 {
 		return
 	}
@@ -844,10 +1051,12 @@ func (s *Server) handleMorningSummaryNotifications(
 		}
 	}
 
+	// Iterate through all users configured for this site and dispatch their morning summary
 	for userID, notifConfig := range site.Notifications {
 		if !notifConfig.MorningSummaryEnabled || nowLocal.Hour() != notifConfig.MorningSummaryHour {
 			continue
 		}
+		// Ensure only one morning summary is delivered per user per calendar day
 		if getNotifState != nil && getNotifState().hasSentToday(userID, types.NotificationTypeMorningSummary, todayDateStr, siteLoc) {
 			continue
 		}
@@ -864,19 +1073,33 @@ func (s *Server) handleMorningSummaryNotifications(
 			continue
 		}
 
+		// Retrieve simulation hourly projection data for today
 		simData := data.getSimData(ctx, s, site.ID, nowLocal)
 
 		var todayForecastKWH float64
 		var hitCapacityAt time.Time
+		maxSimSOC := data.status.BatterySOC
+
+		// Aggregate today's forecasted solar generation, find the projected peak SOC,
+		// and inspect when the battery is projected to hit 100% capacity.
 		for _, slot := range simData {
 			if !slot.TS.Before(todayStart) && slot.TS.Before(todayEnd) {
 				todayForecastKWH += slot.PredictedSolarKWH
-				if hitCapacityAt.IsZero() {
-					if !slot.HitCapacityAt.IsZero() && slot.HitCapacityAt.After(nowLocal) {
-						hitCapacityAt = slot.HitCapacityAt
-					} else if !slot.HitSolarCapacityAt.IsZero() && slot.HitSolarCapacityAt.After(nowLocal) {
-						hitCapacityAt = slot.HitSolarCapacityAt
+
+				if slot.BatteryCapacityKWH > 0 {
+					startSOC := (slot.StartBatteryKWH / slot.BatteryCapacityKWH) * 100.0
+					endSOC := (slot.BatteryKWH / slot.BatteryCapacityKWH) * 100.0
+					if startSOC > maxSimSOC {
+						maxSimSOC = startSOC
 					}
+					if endSOC > maxSimSOC {
+						maxSimSOC = endSOC
+					}
+				}
+
+				// Strictly inspect HitCapacityAt from the simulation controller
+				if hitCapacityAt.IsZero() && !slot.HitCapacityAt.IsZero() && slot.HitCapacityAt.After(nowLocal) {
+					hitCapacityAt = slot.HitCapacityAt
 				}
 			}
 		}
@@ -884,12 +1107,31 @@ func (s *Server) handleMorningSummaryNotifications(
 		yesterdayStart := todayStart.AddDate(0, 0, -1)
 		yesterdayActualKWH := dailySolarMap[yesterdayStart.Format("2006-01-02")]
 
-		title, body := generateMorningSummary(notifConfig.MorningSummaryFlavor, data.status, todayForecastKWH, yesterdayActualKWH, peakSolarKWH, hitCapacityAt, siteLoc)
-		s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeMorningSummary, notifConfig.MorningSummaryFlavor, title, body, "/forecast")
+		solarRatio := 0.0
+		if peakSolarKWH > 0 {
+			solarRatio = todayForecastKWH / peakSolarKWH
+		}
+
+		// Populate structured metadata for client-side rendering and logging analysis
+		metadata := map[string]string{
+			"currentSOC":        fmt.Sprintf("%.1f", data.status.BatterySOC),
+			"peakSOC":           fmt.Sprintf("%.1f", maxSimSOC),
+			"solarRatio":        fmt.Sprintf("%.2f", solarRatio),
+			"forecastSolarKWH":  fmt.Sprintf("%.2f", todayForecastKWH),
+			"yesterdaySolarKWH": fmt.Sprintf("%.2f", yesterdayActualKWH),
+		}
+		if !hitCapacityAt.IsZero() {
+			metadata["hitCapacityAt"] = hitCapacityAt.In(siteLoc).Format(time.RFC3339)
+		}
+
+		title, body := generateMorningSummary(notifConfig.MorningSummaryFlavor, data.status, todayForecastKWH, yesterdayActualKWH, peakSolarKWH, hitCapacityAt, maxSimSOC, siteLoc)
+		s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeMorningSummary, notifConfig.MorningSummaryFlavor, title, body, "/forecast", metadata)
 	}
 }
 
-// handleEveningSummaryNotifications evaluates and sends evening summary notifications.
+// handleEveningSummaryNotifications evaluates and sends evening summary push notifications.
+// It summarizes today's actual performance (solar generation, home usage, grid import/export)
+// and projects whether the battery will supply the home through the night or hit reserve.
 func (s *Server) handleEveningSummaryNotifications(
 	ctx context.Context,
 	site types.Site,
@@ -911,6 +1153,7 @@ func (s *Server) handleEveningSummaryNotifications(
 		if !notifConfig.EveningSummaryEnabled || nowLocal.Hour() != notifConfig.EveningSummaryHour {
 			continue
 		}
+		// Ensure only one evening summary is delivered per user per calendar day
 		if getNotifState != nil && getNotifState().hasSentToday(userID, types.NotificationTypeEveningSummary, todayDateStr, siteLoc) {
 			continue
 		}
@@ -927,6 +1170,9 @@ func (s *Server) handleEveningSummaryNotifications(
 			continue
 		}
 
+		// Inspect simulation slots to determine if the battery will hit reserve overnight.
+		// If a deficit is predicted after tomorrow's solar refilling begins, the battery successfully
+		// powers the home through the entire night.
 		simData := data.getSimData(ctx, s, site.ID, nowLocal)
 
 		var hitDeficitAt time.Time
@@ -934,15 +1180,12 @@ func (s *Server) handleEveningSummaryNotifications(
 		tomorrowDay := nowLocal.AddDate(0, 0, 1).Day()
 
 		for _, slot := range simData {
-			if slot.TS.Day() == tomorrowDay && slot.PredictedSolarKWH > 0.2 && tomorrowSolarStart.IsZero() {
+			if slot.TS.In(siteLoc).Day() == tomorrowDay && slot.PredictedSolarKWH > 0.2 && tomorrowSolarStart.IsZero() {
 				tomorrowSolarStart = slot.TS
 			}
-			if hitDeficitAt.IsZero() {
-				if !slot.HitDeficitAt.IsZero() && slot.HitDeficitAt.After(nowLocal) {
-					hitDeficitAt = slot.HitDeficitAt
-				} else if !slot.HitThresholdDeficitAt.IsZero() && slot.HitThresholdDeficitAt.After(nowLocal) {
-					hitDeficitAt = slot.HitThresholdDeficitAt
-				}
+			// Strictly inspect HitDeficitAt without buffering or threshold heuristics
+			if hitDeficitAt.IsZero() && !slot.HitDeficitAt.IsZero() && slot.HitDeficitAt.After(nowLocal) {
+				hitDeficitAt = slot.HitDeficitAt
 			}
 		}
 
@@ -952,6 +1195,7 @@ func (s *Server) handleEveningSummaryNotifications(
 			hitDeficitAt = time.Time{}
 		}
 
+		// Aggregate today's energy metrics from midnight up to the current hour
 		todayStart := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, siteLoc)
 		todayEnd := todayStart.AddDate(0, 0, 1)
 		var todayActualSolarKWH, todayHomeUsageKWH, todayGridImportKWH, todayGridExportKWH float64
@@ -966,10 +1210,20 @@ func (s *Server) handleEveningSummaryNotifications(
 				}
 			}
 		}
-		_ = todayGridImportKWH
 
-		title, body := generateEveningSummary(notifConfig.EveningSummaryFlavor, data.status, todayActualSolarKWH, todayHomeUsageKWH, todayGridExportKWH, hitDeficitAt, siteLoc)
-		s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeEveningSummary, notifConfig.EveningSummaryFlavor, title, body, "/dashboard")
+		minSOC := data.settings.MinBatterySOC
+
+		// Populate structured metadata for evening summary
+		metadata := map[string]string{
+			"currentSOC":         fmt.Sprintf("%.1f", data.status.BatterySOC),
+			"todaySolarKWH":      fmt.Sprintf("%.2f", todayActualSolarKWH),
+			"todayHomeUsageKWH":  fmt.Sprintf("%.2f", todayHomeUsageKWH),
+			"todayGridImportKWH": fmt.Sprintf("%.2f", todayGridImportKWH),
+			"todayGridExportKWH": fmt.Sprintf("%.2f", todayGridExportKWH),
+		}
+
+		title, body := generateEveningSummary(notifConfig.EveningSummaryFlavor, data.status, todayActualSolarKWH, todayHomeUsageKWH, todayGridExportKWH, todayGridImportKWH, minSOC, hitDeficitAt, siteLoc)
+		s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeEveningSummary, notifConfig.EveningSummaryFlavor, title, body, "/dashboard", metadata)
 	}
 }
 
@@ -1006,7 +1260,10 @@ func (s *Server) handleGridOutageNotifications(
 			}
 			title := "✅ Grid Power Restored"
 			body := "The electric grid is back online. Your system has safely resumed normal grid-tied operation."
-			s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeGridRestored, "", title, body, "/#dashboard")
+			metadata := map[string]string{
+				"currentSOC": fmt.Sprintf("%.1f", status.BatterySOC),
+			}
+			s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeGridRestored, "", title, body, "/#dashboard", metadata)
 		}
 	} else if status.GridUnavailable && essSystem != nil {
 		if getNotifState != nil && getNotifState().lastGridEvent() == types.NotificationTypeGridOutage {
@@ -1077,8 +1334,12 @@ func (s *Server) handleGridOutageNotifications(
 						}
 						title := "⚠️ Grid Outage Detected"
 						body := fmt.Sprintf("Utility grid power is currently down. Battery reserve is at %.0f%%%s.", currStatus.BatterySOC, hrsRemainingStr)
+						metadata := map[string]string{
+							"currentSOC": fmt.Sprintf("%.1f", currStatus.BatterySOC),
+							"homeKW":     fmt.Sprintf("%.2f", currStatus.HomeKW),
+						}
 						for _, user := range outageUsers {
-							s.dispatchPushToUser(asyncCtx, site.ID, user, types.NotificationTypeGridOutage, "", title, body, "/dashboard")
+							s.dispatchPushToUser(asyncCtx, site.ID, user, types.NotificationTypeGridOutage, "", title, body, "/dashboard", metadata)
 						}
 					} else {
 						log.Ctx(asyncCtx).InfoContext(asyncCtx, "grid outage was a temporary blip (<5m), suppressed notification",
@@ -1088,10 +1349,50 @@ func (s *Server) handleGridOutageNotifications(
 				}(ctx)
 			}
 		}
+	} else {
+		// Grid is available: check if we should send a restored notification
+		if getNotifState == nil || getNotifState().lastGridEvent() != types.NotificationTypeGridOutage {
+			return
+		}
+
+		for userID, notifConfig := range site.Notifications {
+			if !notifConfig.GridOutageAlert {
+				continue
+			}
+			user, err := s.storage.GetUser(ctx, userID)
+			if err != nil {
+				log.Ctx(ctx).ErrorContext(ctx, "failed to get user for grid restored notification",
+					slog.String("siteID", site.ID),
+					slog.String("userID", userID),
+					slog.Any("error", err),
+				)
+				continue
+			}
+			if len(user.Subscriptions) > 0 {
+				title := "✅ Grid Power Restored"
+				body := fmt.Sprintf("Grid electricity has reconnected. Battery is at %.0f%%. System returned to normal operation.", status.BatterySOC)
+				metadata := map[string]string{
+					"currentSOC": fmt.Sprintf("%.1f", status.BatterySOC),
+				}
+				s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeGridRestored, "", title, body, "/#dashboard", metadata)
+			}
+		}
 	}
 }
 
-// handlePriceSpikeNotifications evaluates and sends real-time electricity price spike alerts.
+// handlePriceSpikeNotifications evaluates incoming current and forecasted electricity prices against
+// historical baselines to send price spike push notifications to subscribed users.
+//
+// Key features:
+// - Evaluates both active real-time prices and upcoming horizon forecasts.
+// - Supports High, Medium, and Low sensitivity tiers:
+//   - High: Triggers on top 10% of all hours without time-of-day restriction.
+//   - Medium: Triggers on top 10% of all hours AND requires price to exceed the +/- 1h time-of-day baseline.
+//   - Low: Triggers on top 5% of all hours AND requires price to exceed the +/- 1h time-of-day baseline.
+//
+// - Scans forward to detect contiguous duration and projected peak time/price.
+// - Formats battery simulation outcome (solar coverage, battery capacity survival, reserve deficit ETA).
+// - Enforces a tiered anti-flapping cooldown: 1-hour lockout, 1-6h surge threshold, and 6-24h drop-below check.
 func (s *Server) handlePriceSpikeNotifications(
 	ctx context.Context,
 	site types.Site,
@@ -1099,16 +1400,36 @@ func (s *Server) handlePriceSpikeNotifications(
 	nowLocal time.Time,
 	getNotifState func() *siteRecentNotifications,
 ) {
-	if data == nil || len(data.futurePrices) == 0 {
-		return
-	}
-	nextPrice := data.futurePrices[0]
-	nextPriceCost := nextPrice.DollarsPerKWH + nextPrice.GridUseDollarsPerKWH
-	if nextPriceCost < priceSpikeAbsoluteFloorDollarsPerKWH {
+	if data == nil || (len(data.futurePrices) == 0 && data.currentPrice.TSStart.IsZero()) {
 		return
 	}
 
-	siteLoc := nextPrice.TSStart.Location()
+	// Calculate total unit electricity cost ($/kWh) including energy supply and grid delivery fees
+	currentCost := data.currentPrice.DollarsPerKWH + data.currentPrice.GridUseDollarsPerKWH
+	var nextPriceCost float64
+	var hasFuturePrice bool
+	if len(data.futurePrices) > 0 {
+		hasFuturePrice = true
+		nextPriceCost = data.futurePrices[0].DollarsPerKWH + data.futurePrices[0].GridUseDollarsPerKWH
+	}
+
+	// Fast rejection: If neither the current price nor the next future price meets the absolute price floor,
+	// skip history fetching and heavy evaluations entirely.
+	currentCouldSpike := !data.currentPrice.TSStart.IsZero() && currentCost >= priceSpikeAbsoluteFloorDollarsPerKWH
+	futureCouldSpike := hasFuturePrice && nextPriceCost >= priceSpikeAbsoluteFloorDollarsPerKWH
+	if !currentCouldSpike && !futureCouldSpike {
+		return
+	}
+
+	// Determine site location / timezone for day-of-week and hour-of-day evaluations
+	var siteLoc *time.Location
+	if !data.currentPrice.TSStart.IsZero() {
+		siteLoc = data.currentPrice.TSStart.Location()
+	} else if len(data.futurePrices) > 0 && !data.futurePrices[0].TSStart.IsZero() {
+		siteLoc = data.futurePrices[0].TSStart.Location()
+	} else if !nowLocal.IsZero() {
+		siteLoc = nowLocal.Location()
+	}
 	if siteLoc == nil {
 		siteLoc = time.UTC
 	}
@@ -1116,6 +1437,7 @@ func (s *Server) handlePriceSpikeNotifications(
 		nowLocal = s.now().In(siteLoc)
 	}
 
+	// Filter users configured to receive price spike alerts for this site
 	var spikeUsers []struct {
 		userID      string
 		sensitivity string
@@ -1133,6 +1455,7 @@ func (s *Server) handlePriceSpikeNotifications(
 		return
 	}
 
+	// Fetch up to 5 days of recent price history to establish the baseline percentile distributions
 	startHist := nowLocal.AddDate(0, 0, -5).UTC()
 	endHist := nowLocal.UTC()
 	histPrices, err := s.storage.GetPriceHistory(ctx, site.ID, startHist, endHist)
@@ -1144,161 +1467,358 @@ func (s *Server) handlePriceSpikeNotifications(
 		return
 	}
 	if len(histPrices) == 0 {
-		log.Ctx(ctx).WarnContext(ctx, "no price history found for price spike notification",
-			slog.String("siteID", site.ID),
-			slog.Time("start", startHist),
-			slog.Time("end", endHist),
-		)
 		return
 	}
 
+	// Compute raw total unit costs and overall median across all historical hours
 	var rawCosts []float64
 	for _, p := range histPrices {
 		rawCosts = append(rawCosts, p.DollarsPerKWH+p.GridUseDollarsPerKWH)
 	}
-	refPrice := computeHourRefPrice(histPrices, nextPrice.TSStart.In(siteLoc).Hour(), siteLoc, data.currentPrice.DollarsPerKWH+data.currentPrice.GridUseDollarsPerKWH)
+	medianCost := computePricePercentile(rawCosts, 0.50)
 
 	for _, su := range spikeUsers {
-		var minDelta, reqPercentile float64
+		// Map user-selected sensitivity tier to spike detection parameters:
+		// - "high": Top 10% (0.90) of all hours alone. Does NOT require time-of-day relative comparison,
+		//   so it alerts whenever price is in the top 10% of all hours, even if recurring every week.
+		// - "medium": Top 10% (0.90) of all hours AND time-of-day relative (+/- 1 hour buffer).
+		//   Requires the price to be in the top 10% of all hours AND significantly above the typical
+		//   price for this time of day (+/- 1h), filtering out normal daily evening peaks.
+		// - "low": Top 5% (0.95) of all hours AND time-of-day relative (+/- 1 hour buffer).
+		//   Only alerts on severe surges in the top 5% that also exceed the time-of-day baseline.
+		var minDelta, reqPercentile, escalatedPercentile float64
+		var useTimeOfDayRelative bool
 		switch su.sensitivity {
 		case "low":
 			minDelta = priceSpikeMinDeltaLow
 			reqPercentile = priceSpikePercentileLow
+			escalatedPercentile = priceSpikeEscalatedPercentileLow
+			useTimeOfDayRelative = true
 		case "high":
 			minDelta = priceSpikeMinDeltaHigh
 			reqPercentile = priceSpikePercentileHigh
+			escalatedPercentile = priceSpikeEscalatedPercentileHigh
+			useTimeOfDayRelative = false
 		case "medium":
 			fallthrough
 		default:
 			minDelta = priceSpikeMinDeltaMedium
 			reqPercentile = priceSpikePercentileMedium
+			escalatedPercentile = priceSpikeEscalatedPercentileMedium
+			useTimeOfDayRelative = true
 		}
 
 		pctVal := computePricePercentile(rawCosts, reqPercentile)
-		if nextPriceCost >= pctVal && (nextPriceCost-refPrice) >= minDelta {
-			if getNotifState != nil && getNotifState().hasSentWithin(su.userID, types.NotificationTypePriceSpike, priceSpikeDeduplicationWindow, s.now()) {
-				continue
-			}
-			user, err := s.storage.GetUser(ctx, su.userID)
-			if err != nil {
-				log.Ctx(ctx).ErrorContext(ctx, "failed to get user for price spike notification",
-					slog.String("siteID", site.ID),
-					slog.String("userID", su.userID),
-					slog.Any("error", err),
-				)
-				continue
-			}
-			if len(user.Subscriptions) > 0 {
-				title := fmt.Sprintf("🚨 Price Spike Ahead: $%.2f/kWh at %s", nextPriceCost, nextPrice.TSStart.In(siteLoc).Format("3:04 PM"))
-				body := fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). RateRudder will prioritize battery power to protect your home.", refPrice)
 
-				simData := data.getSimData(ctx, s, site.ID, nowLocal)
-				if len(simData) > 0 {
-					spikeStart := nextPrice.TSStart
-					spikeEnd := nextPrice.TSEnd
-					if spikeEnd.IsZero() {
-						spikeEnd = spikeStart.Add(time.Hour)
+		// Candidate 1: Current price (active right now).
+		// For Medium/Low, reference price is the time-of-day median (+/- 1 hour on previous days).
+		// For High sensitivity, reference price is the overall all-hours median.
+		var refPriceCurrent float64
+		if useTimeOfDayRelative {
+			refPriceCurrent = computeTimeOfDayRefPrice(histPrices, data.currentPrice.TSStart, siteLoc, medianCost)
+		} else {
+			refPriceCurrent = medianCost
+		}
+		isCurrentSpike := !data.currentPrice.TSStart.IsZero() &&
+			currentCost >= priceSpikeAbsoluteFloorDollarsPerKWH &&
+			currentCost >= pctVal &&
+			(currentCost-refPriceCurrent) >= minDelta
+
+		// Candidate 2: Future upcoming price (data.futurePrices[0]).
+		var isFutureSpike bool
+		var nextPrice types.Price
+		var refPriceNext float64
+		if len(data.futurePrices) > 0 {
+			nextPrice = data.futurePrices[0]
+			if useTimeOfDayRelative {
+				refPriceNext = computeTimeOfDayRefPrice(histPrices, nextPrice.TSStart, siteLoc, medianCost)
+			} else {
+				refPriceNext = medianCost
+			}
+			isFutureSpike = nextPriceCost >= priceSpikeAbsoluteFloorDollarsPerKWH &&
+				nextPriceCost >= pctVal &&
+				(nextPriceCost-refPriceNext) >= minDelta
+		}
+
+		// If neither the active current price nor the next upcoming hour qualifies as a spike, skip.
+		if !isCurrentSpike && !isFutureSpike {
+			continue
+		}
+
+		var spikeStart, spikeEnd time.Time
+		var activeSpikeCost, maxSpikeCost float64
+		var maxSpikeTime time.Time
+		var refPrice float64
+
+		// Scan forward to determine the full contiguous duration of elevated prices and locate the peak price/time.
+		if isCurrentSpike {
+			spikeStart = data.currentPrice.TSStart
+			spikeEnd = data.currentPrice.TSEnd
+			if spikeEnd.IsZero() {
+				spikeEnd = spikeStart.Add(time.Hour)
+			}
+			activeSpikeCost = currentCost
+			maxSpikeCost = currentCost
+			maxSpikeTime = spikeStart
+			refPrice = refPriceCurrent
+
+			// Scan forward across contiguous future prices that remain elevated
+			for _, fp := range data.futurePrices {
+				if !fp.TSStart.Before(spikeEnd) && (fp.TSStart.Equal(spikeEnd) || fp.TSStart.Sub(spikeEnd) <= 15*time.Minute) {
+					fpCost := fp.DollarsPerKWH + fp.GridUseDollarsPerKWH
+					var fpRef float64
+					if useTimeOfDayRelative {
+						fpRef = computeTimeOfDayRefPrice(histPrices, fp.TSStart, siteLoc, medianCost)
+					} else {
+						fpRef = medianCost
 					}
-					for i := 1; i < len(data.futurePrices); i++ {
-						fp := data.futurePrices[i]
-						fpCost := fp.DollarsPerKWH + fp.GridUseDollarsPerKWH
-						fpRef := computeHourRefPrice(histPrices, fp.TSStart.In(siteLoc).Hour(), siteLoc, refPrice)
-						if fpCost >= pctVal && (fpCost-fpRef) >= minDelta {
-							if !fp.TSEnd.IsZero() {
-								spikeEnd = fp.TSEnd
-							} else {
-								spikeEnd = fp.TSStart.Add(time.Hour)
-							}
+					if fpCost >= priceSpikeAbsoluteFloorDollarsPerKWH && fpCost >= pctVal && (fpCost-fpRef) >= minDelta {
+						if !fp.TSEnd.IsZero() {
+							spikeEnd = fp.TSEnd
 						} else {
-							break
+							spikeEnd = fp.TSStart.Add(time.Hour)
 						}
+						if fpCost > maxSpikeCost+0.005 {
+							maxSpikeCost = fpCost
+							maxSpikeTime = fp.TSStart
+						}
+					} else {
+						break
 					}
+				}
+			}
+		} else {
+			spikeStart = nextPrice.TSStart
+			spikeEnd = nextPrice.TSEnd
+			if spikeEnd.IsZero() {
+				spikeEnd = spikeStart.Add(time.Hour)
+			}
+			activeSpikeCost = nextPriceCost
+			maxSpikeCost = nextPriceCost
+			maxSpikeTime = nextPrice.TSStart
+			refPrice = refPriceNext
 
-					var spikeSlots []controller.SimHour
-					for _, slot := range simData {
-						slotEnd := slot.TS.Add(time.Hour)
-						if slotEnd.After(spikeStart) && !slot.TS.After(spikeEnd) && slot.TS.Before(spikeEnd) {
-							spikeSlots = append(spikeSlots, slot)
-						}
+			// Scan forward across subsequent future prices
+			for i := 1; i < len(data.futurePrices); i++ {
+				fp := data.futurePrices[i]
+				if !fp.TSStart.Before(spikeEnd) && (fp.TSStart.Equal(spikeEnd) || fp.TSStart.Sub(spikeEnd) <= 15*time.Minute) {
+					fpCost := fp.DollarsPerKWH + fp.GridUseDollarsPerKWH
+					var fpRef float64
+					if useTimeOfDayRelative {
+						fpRef = computeTimeOfDayRefPrice(histPrices, fp.TSStart, siteLoc, medianCost)
+					} else {
+						fpRef = medianCost
 					}
-					if len(spikeSlots) == 0 {
-						for _, slot := range simData {
-							slotLocal := slot.TS.In(siteLoc)
-							spikeLocal := spikeStart.In(siteLoc)
-							if slotLocal.Year() == spikeLocal.Year() && slotLocal.Month() == spikeLocal.Month() && slotLocal.Day() == spikeLocal.Day() && slotLocal.Hour() == spikeLocal.Hour() {
-								spikeSlots = append(spikeSlots, slot)
-							}
+					if fpCost >= priceSpikeAbsoluteFloorDollarsPerKWH && fpCost >= pctVal && (fpCost-fpRef) >= minDelta {
+						if !fp.TSEnd.IsZero() {
+							spikeEnd = fp.TSEnd
+						} else {
+							spikeEnd = fp.TSStart.Add(time.Hour)
 						}
+						if fpCost > maxSpikeCost+0.005 {
+							maxSpikeCost = fpCost
+							maxSpikeTime = fp.TSStart
+						}
+					} else {
+						break
 					}
+				}
+			}
+		}
 
-					batteryCapacity := data.status.BatteryCapacityKWH
-					if batteryCapacity <= 0 && len(spikeSlots) > 0 {
-						batteryCapacity = spikeSlots[0].BatteryCapacityKWH
+		// Cooldown and Anti-Flapping Logic:
+		// 1. Hard 1-hour lockout: Never re-alert within 1 hour of an alert.
+		// 2. 1h to 6h window: Only re-alert if price is significantly higher (>= 20% surge above previously
+		//    alerted/warned peak price) AND meets the escalated percentile threshold (e.g. top 5% or 2%).
+		// 3. 6h to 24h window: Re-alert if prices dropped back below spike thresholds between alerts.
+		//    If prices stayed continuously elevated for 6+ hours at the same high level, do not re-alert
+		//    about the same price until the next day.
+		// 4. 24h+: Standard alert thresholds apply.
+		if getNotifState != nil {
+			lastLog := getNotifState().lastPriceSpikeLog(su.userID)
+			if lastLog != nil {
+				timeSince := s.now().Sub(lastLog.TSCreated)
+				if timeSince < 1*time.Hour {
+					continue
+				}
+
+				prevPeakCost := extractHighestAlertedPrice(lastLog)
+				var isSignificantSurge bool
+				if prevPeakCost > 0 {
+					escalatedPctVal := computePricePercentile(rawCosts, escalatedPercentile)
+					checkCost := activeSpikeCost
+					if maxSpikeCost > checkCost {
+						checkCost = maxSpikeCost
 					}
+					isSignificantSurge = (checkCost >= prevPeakCost*priceSpikeSignificantMultiplier) && (checkCost >= escalatedPctVal)
+				}
 
-					if len(spikeSlots) > 0 {
-						hasSolar := false
-						solarCoversAll := true
-						for _, slot := range spikeSlots {
-							if slot.PredictedSolarKWH > 0.1 {
-								hasSolar = true
-							}
-							if slot.NetLoadSolarKWH > 0.05 {
-								solarCoversAll = false
-							}
-						}
+				if timeSince < 6*time.Hour {
+					if !isSignificantSurge {
+						continue
+					}
+				} else if timeSince < 24*time.Hour {
+					droppedBelow := priceDroppedBelowBetween(
+						histPrices,
+						lastLog.TSCreated,
+						spikeStart,
+						rawCosts,
+						reqPercentile,
+						minDelta,
+						useTimeOfDayRelative,
+						siteLoc,
+					)
+					if !droppedBelow && !isSignificantSurge {
+						continue
+					}
+				}
+			}
+		}
 
-						if hasSolar && solarCoversAll {
-							body = fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). Solar is projected to cover your home during the spike without drawing from the battery.", refPrice)
-						} else if batteryCapacity > 0 {
-							currentSOC := data.status.BatterySOC
-							if currentSOC == 0 && spikeSlots[0].BatteryCapacityKWH > 0 {
-								currentSOC = (spikeSlots[0].StartBatteryKWH / spikeSlots[0].BatteryCapacityKWH) * 100.0
-							}
-							reserveSOC := data.settings.MinBatterySOC
-							if reserveSOC == 0 && spikeSlots[0].BatteryCapacityKWH > 0 && spikeSlots[0].BatteryReserveKWH > 0 {
-								reserveSOC = (spikeSlots[0].BatteryReserveKWH / spikeSlots[0].BatteryCapacityKWH) * 100.0
-							}
+		user, err := s.storage.GetUser(ctx, su.userID)
+		if err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to get user for price spike notification",
+				slog.String("siteID", site.ID),
+				slog.String("userID", su.userID),
+				slog.Any("error", err),
+			)
+			continue
+		}
+		if len(user.Subscriptions) == 0 {
+			continue
+		}
 
-							if currentSOC <= reserveSOC {
-								body = fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). Battery is currently at %.0f%% reserve; your home will draw from the grid during the spike.", refPrice, currentSOC)
-							} else {
-								var hitDeficitAt time.Time
-								for _, slot := range spikeSlots {
-									if !slot.HitDeficitAt.IsZero() && !slot.HitDeficitAt.Before(spikeStart) && slot.HitDeficitAt.Before(spikeEnd) {
-										hitDeficitAt = slot.HitDeficitAt
-										break
-									}
-									if !slot.HitThresholdDeficitAt.IsZero() && !slot.HitThresholdDeficitAt.Before(spikeStart) && slot.HitThresholdDeficitAt.Before(spikeEnd) {
-										if hitDeficitAt.IsZero() {
-											hitDeficitAt = slot.HitThresholdDeficitAt
-										}
-									}
-									if hitDeficitAt.IsZero() && (slot.TotalBatteryDeficitKWH > 0 || slot.BatteryKWH <= slot.BatteryReserveKWH+0.05) {
-										hitDeficitAt = slot.TS
-										break
-									}
-								}
+		// Construct Notification Title and Opening Sentence:
+		// If the spike is active right now:
+		// - If upcoming hours peak even higher (+2¢ or more), mention the current price and projected peak time/price.
+		// - Otherwise, state the current price and duration.
+		// If the spike begins in an upcoming hour:
+		// - State when it begins, along with any projected higher peak time/price.
+		var title, firstSentence string
+		if isCurrentSpike {
+			if maxSpikeCost >= activeSpikeCost+0.02 {
+				title = fmt.Sprintf("🚨 Price Spike: $%.2f/kWh (peaking at $%.2f at %s)", activeSpikeCost, maxSpikeCost, maxSpikeTime.In(siteLoc).Format("3:04 PM"))
+				firstSentence = fmt.Sprintf("Price is $%.2f/kWh now and expected to rise to $%.2f/kWh at %s (lasting until %s).", activeSpikeCost, maxSpikeCost, maxSpikeTime.In(siteLoc).Format("3:04 PM"), spikeEnd.In(siteLoc).Format("3:04 PM"))
+			} else {
+				title = fmt.Sprintf("🚨 Price Spike: $%.2f/kWh", activeSpikeCost)
+				firstSentence = fmt.Sprintf("Price is $%.2f/kWh now and anticipated to last until %s.", activeSpikeCost, spikeEnd.In(siteLoc).Format("3:04 PM"))
+			}
+		} else {
+			if maxSpikeCost >= activeSpikeCost+0.02 {
+				title = fmt.Sprintf("🚨 Price Spike Ahead: $%.2f/kWh at %s (peaking at $%.2f at %s)", activeSpikeCost, spikeStart.In(siteLoc).Format("3:04 PM"), maxSpikeCost, maxSpikeTime.In(siteLoc).Format("3:04 PM"))
+				firstSentence = fmt.Sprintf("Price is projected to reach $%.2f/kWh at %s and peak at $%.2f/kWh at %s (lasting until %s).", activeSpikeCost, spikeStart.In(siteLoc).Format("3:04 PM"), maxSpikeCost, maxSpikeTime.In(siteLoc).Format("3:04 PM"), spikeEnd.In(siteLoc).Format("3:04 PM"))
+			} else {
+				title = fmt.Sprintf("🚨 Price Spike Ahead: $%.2f/kWh at %s", activeSpikeCost, spikeStart.In(siteLoc).Format("3:04 PM"))
+				firstSentence = fmt.Sprintf("Price is projected to reach $%.2f/kWh at %s (lasting until %s).", activeSpikeCost, spikeStart.In(siteLoc).Format("3:04 PM"), spikeEnd.In(siteLoc).Format("3:04 PM"))
+			}
+		}
 
-								if !hitDeficitAt.IsZero() {
-									body = fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). Battery is at %.0f%% and projected to reach reserve at ~%s before the spike ends.", refPrice, currentSOC, hitDeficitAt.In(siteLoc).Format("3:04 PM"))
-								} else if !spikeSlots[0].HitDeficitAt.IsZero() && spikeSlots[0].HitDeficitAt.Before(spikeStart) {
-									body = fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). Battery is at %.0f%% and projected to reach reserve at ~%s before the spike begins.", refPrice, currentSOC, spikeSlots[0].HitDeficitAt.In(siteLoc).Format("3:04 PM"))
-								} else {
-									body = fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). Battery is at %.0f%% and projected to power your home through the entire spike.", refPrice, currentSOC)
-								}
-							}
-						}
+		// Second sentence explains the baseline comparison and what RateRudder will do.
+		// Defaults to stating RateRudder will prioritize battery power.
+		secondSentence := fmt.Sprintf("Electricity rates are surging significantly above recent prices ($%.2f/kWh). RateRudder will prioritize battery power to protect your home.", refPrice)
+
+		// Inspect hourly simulation data across the spike slots to provide specific home battery outcome guidance:
+		// 1. If solar generation covers entire home consumption: inform user solar is powering home without drawing battery.
+		// 2. If battery is already at or below reserve: warn that the home will draw from grid during the spike.
+		// 3. If battery will run out of energy before the spike ends: provide the estimated time battery reaches reserve.
+		// 4. If battery lasts through the entire spike: reassure user battery powers home through the whole event.
+		currentSOC := data.status.BatterySOC
+		simData := data.getSimData(ctx, s, site.ID, nowLocal)
+		if len(simData) > 0 {
+			var spikeSlots []controller.SimHour
+			for i, slot := range simData {
+				var slotEnd time.Time
+				if i+1 < len(simData) && !simData[i+1].TS.IsZero() {
+					slotEnd = simData[i+1].TS
+				} else if i > 0 && !simData[i-1].TS.IsZero() {
+					slotEnd = slot.TS.Add(slot.TS.Sub(simData[i-1].TS))
+				} else if !spikeEnd.IsZero() && spikeEnd.After(slot.TS) {
+					slotEnd = spikeEnd
+				} else {
+					slotEnd = slot.TS.Add(30 * time.Minute)
+				}
+
+				// Check if the simulation slot overlaps with the price spike interval [spikeStart, spikeEnd)
+				if slotEnd.After(spikeStart) && slot.TS.Before(spikeEnd) {
+					spikeSlots = append(spikeSlots, slot)
+				}
+			}
+
+			if len(spikeSlots) > 0 {
+				hasSolar := false
+				solarCoversAll := true
+				for _, slot := range spikeSlots {
+					// Require meaningful solar generation (>= 0.5 kWh, i.e. 500Wh for 1h or 1kW rate for 30m)
+					// to conclude solar actively covers the home rather than zero-load/dawn noise.
+					if slot.PredictedSolarKWH >= 0.5 {
+						hasSolar = true
+					}
+					// If net home load after solar exceeds 0.1 kWh in any slot, solar does not cover all demand.
+					if slot.NetLoadSolarKWH > 0.1 {
+						solarCoversAll = false
 					}
 				}
 
-				s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypePriceSpike, su.sensitivity, title, body, "/forecast")
+				if hasSolar && solarCoversAll {
+					secondSentence = "Solar is projected to cover your home during the spike without drawing from the battery."
+				} else {
+					if currentSOC == 0 && spikeSlots[0].BatteryCapacityKWH > 0 {
+						currentSOC = (spikeSlots[0].StartBatteryKWH / spikeSlots[0].BatteryCapacityKWH) * 100.0
+					}
+					reserveSOC := data.settings.MinBatterySOC
+					if reserveSOC == 0 && spikeSlots[0].BatteryCapacityKWH > 0 && spikeSlots[0].BatteryReserveKWH > 0 {
+						reserveSOC = (spikeSlots[0].BatteryReserveKWH / spikeSlots[0].BatteryCapacityKWH) * 100.0
+					}
+
+					if currentSOC <= reserveSOC {
+						secondSentence = fmt.Sprintf("Battery is currently at %.0f%% reserve; your home will draw from the grid during the spike.", currentSOC)
+					} else {
+						var hitDeficitAt time.Time
+						for _, slot := range spikeSlots {
+							if !slot.HitDeficitAt.IsZero() && !slot.HitDeficitAt.Before(spikeStart) && slot.HitDeficitAt.Before(spikeEnd) {
+								hitDeficitAt = slot.HitDeficitAt
+								break
+							}
+						}
+
+						if !hitDeficitAt.IsZero() {
+							secondSentence = fmt.Sprintf("Battery is at %.0f%% and projected to reach reserve at ~%s before the spike ends.", currentSOC, hitDeficitAt.In(siteLoc).Format("3:04 PM"))
+						} else {
+							secondSentence = fmt.Sprintf("Battery is at %.0f%% and projected to power your home through the entire spike.", currentSOC)
+						}
+					}
+				}
 			}
 		}
+
+		// Store structured metadata on the notification log for debugging and re-alert evaluations
+		metadata := map[string]string{
+			"price":      fmt.Sprintf("%.4f", activeSpikeCost),
+			"peakPrice":  fmt.Sprintf("%.4f", maxSpikeCost),
+			"refPrice":   fmt.Sprintf("%.4f", refPrice),
+			"currentSOC": fmt.Sprintf("%.1f", currentSOC),
+			"spikeStart": spikeStart.In(siteLoc).Format(time.RFC3339),
+			"spikeEnd":   spikeEnd.In(siteLoc).Format(time.RFC3339),
+		}
+
+		body := fmt.Sprintf("%s %s", firstSentence, secondSentence)
+		s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypePriceSpike, su.sensitivity, title, body, "/forecast", metadata)
 	}
 }
 
-// handleSolarUnderproductionNotifications evaluates and sends unexpected solar underproduction alerts.
+// handleSolarUnderproductionNotifications evaluates and sends alerts when actual solar production
+// drops significantly below weather-forecasted generation during peak production hours.
+//
+// Key safeguards:
+// 1. Time window: Only evaluated during peak midday hours (11:00 AM - 3:00 PM local time).
+// 2. Weather overcast suppression: If cloud cover exceeds 60%, cloud cover explains the deficit, so no alert is sent.
+// 3. Active alarms/storms: Suppressed during severe weather or ESS hardware alarms.
+// 4. Sensitivity tiers:
+//   - Low: Triggers if actual < 50% of forecast (noticeable underproduction / dirty panels).
+//   - Medium: Triggers if actual < 30% of forecast (moderate underproduction / partial string failure).
+//   - High: Triggers if actual < 15% of forecast (severe underproduction / inverter tripped).
+//
+// 5. Absolute deficit requirement: Requires at least 2.5 kW generation shortfall to prevent micro-alerts.
 func (s *Server) handleSolarUnderproductionNotifications(
 	ctx context.Context,
 	site types.Site,
@@ -1313,10 +1833,12 @@ func (s *Server) handleSolarUnderproductionNotifications(
 			break
 		}
 	}
+	// Restrict evaluation to peak solar hours (11 AM to 3 PM) and suppress during active storms or alarms
 	if !hasAnySolarUser || nowLocal.Hour() < 11 || nowLocal.Hour() > 15 || len(data.status.Storms) > 0 || len(data.status.Alarms) > 0 {
 		return
 	}
 
+	// Check whether recent weather forecasts indicate heavy cloud cover for this hour
 	isOvercast := false
 	for _, w := range data.weatherHistory {
 		for _, hw := range w.ForecastHours {
@@ -1336,6 +1858,7 @@ func (s *Server) handleSolarUnderproductionNotifications(
 		return
 	}
 
+	// Locate the forecasted solar generation for the current hour from simulation data
 	simData := data.getSimData(ctx, s, site.ID, nowLocal)
 
 	var forecastKW float64
@@ -1346,6 +1869,7 @@ func (s *Server) handleSolarUnderproductionNotifications(
 		}
 	}
 
+	// Skip if the forecast for this hour was negligible (< 3.0 kW)
 	if forecastKW < solarUnderproductionMinForecastKW {
 		return
 	}
@@ -1368,6 +1892,7 @@ func (s *Server) handleSolarUnderproductionNotifications(
 			ratio = solarUnderproductionRatioMedium
 		}
 
+		// Check if actual generation is below the sensitivity ratio AND meets the minimum kW deficit
 		if actualKW < ratio*forecastKW && (forecastKW-actualKW) >= solarUnderproductionMinDeficitKW {
 			if getNotifState != nil && getNotifState().hasSentToday(userID, types.NotificationTypeSolarUnderproduction, todayDateStr, nowLocal.Location()) {
 				continue
@@ -1376,13 +1901,19 @@ func (s *Server) handleSolarUnderproductionNotifications(
 			if err == nil && len(user.Subscriptions) > 0 {
 				title := "⚠️ Solar Underproduction Alert"
 				body := fmt.Sprintf("Solar panels are generating %.1f kW, significantly below the %.1f kW forecast for this hour. Check your solar inverter or breakers.", actualKW, forecastKW)
-				s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeSolarUnderproduction, notifConfig.SolarUnderproductionAlert, title, body, "/dashboard")
+				metadata := map[string]string{
+					"currentSolarKW":  fmt.Sprintf("%.2f", actualKW),
+					"forecastSolarKW": fmt.Sprintf("%.2f", forecastKW),
+					"deficitKW":       fmt.Sprintf("%.2f", forecastKW-actualKW),
+				}
+				s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeSolarUnderproduction, notifConfig.SolarUnderproductionAlert, title, body, "/dashboard", metadata)
 			}
 		}
 	}
 }
 
-// handleVPPDispatchNotifications evaluates and sends unplanned VPP dispatch alerts.
+// handleVPPDispatchNotifications evaluates and sends alerts when an unexpected or unplanned Virtual Power Plant
+// (VPP) grid support event is triggered on the user's battery system.
 func (s *Server) handleVPPDispatchNotifications(
 	ctx context.Context,
 	site types.Site,
@@ -1414,6 +1945,8 @@ func (s *Server) handleVPPDispatchNotifications(
 		nowLocal = s.now().In(siteLoc)
 	}
 
+	// Check if this VPP dispatch was scheduled or known in advance.
+	// We only send alerts for unscheduled / unplanned VPP dispatches so users aren't spammed during normal scheduled programs.
 	isPlanned := false
 	for _, p := range vppInfo.Mandatory {
 		if contains, _, _ := p.Contains(nowLocal); contains {
@@ -1422,7 +1955,6 @@ func (s *Server) handleVPPDispatchNotifications(
 		}
 	}
 	if !isPlanned {
-		// TODO: this will only work for franklin systems
 		for _, ev := range status.VPPEvents {
 			if (nowLocal.Equal(ev.TSStart) || nowLocal.After(ev.TSStart)) && nowLocal.Before(ev.TSEnd) {
 				isPlanned = true
@@ -1448,7 +1980,11 @@ func (s *Server) handleVPPDispatchNotifications(
 			if status.BatteryKW > 0.1 {
 				body = "Your battery is discharging to support the electric grid during an unscheduled VPP event."
 			}
-			s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeVPPDispatch, "", title, body, "/dashboard")
+			metadata := map[string]string{
+				"currentSOC": fmt.Sprintf("%.1f", status.BatterySOC),
+				"batteryKW":  fmt.Sprintf("%.2f", status.BatteryKW),
+			}
+			s.dispatchPushToUser(ctx, site.ID, user, types.NotificationTypeVPPDispatch, "", title, body, "/dashboard", metadata)
 		}
 	}
 }

@@ -522,6 +522,7 @@ func (s *Server) performSiteUpdate(
 	if err != nil {
 		return nil, "", fmt.Errorf("controller decision failed: %w", err)
 	}
+	notifData.simData = decision.SimData
 
 	action := decision.Action
 	action.SimulationParams = decision.SimulationParams

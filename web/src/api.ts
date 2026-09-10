@@ -852,6 +852,7 @@ export interface NotificationLog {
     error?: string;
     clicked?: boolean;
     tsClicked?: string;
+    metadata?: Record<string, string>;
 }
 
 export interface MonthlyNotificationLogs {

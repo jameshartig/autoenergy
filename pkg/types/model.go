@@ -350,19 +350,20 @@ type UserNotificationSettings struct {
 
 // NotificationLog records a sent push notification for debugging and click analysis.
 type NotificationLog struct {
-	ID         string    `json:"id"`
-	TSCreated  time.Time `json:"tsCreated"`
-	UserID     string    `json:"userID"`
-	Endpoint   string    `json:"endpoint"`
-	Type       string    `json:"type"`
-	Flavor     string    `json:"flavor"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	Success    bool      `json:"success"`
-	StatusCode int       `json:"statusCode"`
-	Error      string    `json:"error,omitempty"`
-	Clicked    bool      `json:"clicked,omitempty"`
-	TSClicked  time.Time `json:"tsClicked,omitempty"`
+	ID         string            `json:"id"`
+	TSCreated  time.Time         `json:"tsCreated"`
+	UserID     string            `json:"userID"`
+	Endpoint   string            `json:"endpoint"`
+	Type       string            `json:"type"`
+	Flavor     string            `json:"flavor"`
+	Title      string            `json:"title"`
+	Body       string            `json:"body"`
+	Success    bool              `json:"success"`
+	StatusCode int               `json:"statusCode"`
+	Error      string            `json:"error,omitempty"`
+	Clicked    bool              `json:"clicked,omitempty"`
+	TSClicked  time.Time         `json:"tsClicked,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // MonthlyNotificationLogs groups notifications by month in UTC.
