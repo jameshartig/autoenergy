@@ -1525,6 +1525,47 @@ describe('App & Settings', () => {
             expect(screen.getByTestId('utility-section')).not.toHaveClass('highlighted-section');
         });
 
+        it('does not show checklist or highlighted-section on ESS section when changing ESS on configured site', async () => {
+            const user = userEvent.setup();
+            (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
+            (fetchSettings as any).mockResolvedValue({
+                ...defaultSettings,
+                countryCode: 'US',
+                postalCode: '90210',
+                utilityProvider: 'comed',
+                utilityRate: 'comed_besh',
+                ess: 'franklin',
+                hasCredentials: { franklin: true }
+            });
+
+            render(<App />);
+            fireEvent.click(screen.getByText(/Log In/));
+
+            // Navigate to Settings
+            await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
+            fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+
+            await screen.findByRole('heading', { name: /^Settings$/i });
+
+            // Checklist banner should NOT be visible
+            expect(screen.queryByTestId('checklist-banner')).not.toBeInTheDocument();
+            expect(screen.getByTestId('ess-section')).not.toHaveClass('highlighted-section');
+
+            // Click Update on ESS section to open fields
+            const updateBtn = screen.getByRole('button', { name: /Update Energy Storage System/i });
+            await user.click(updateBtn);
+
+            // Change ESS provider in the dropdown
+            const essSelect = await screen.findByLabelText(/ESS Type/i);
+            await user.click(essSelect);
+            const teslaOption = await screen.findByRole('option', { name: 'Tesla' });
+            await user.click(teslaOption);
+
+            // Checklist banner and highlighted-section should still NOT appear
+            expect(screen.queryByTestId('checklist-banner')).not.toBeInTheDocument();
+            expect(screen.getByTestId('ess-section')).not.toHaveClass('highlighted-section');
+        });
+
         it('allows skipping onboarding wizard and going directly to all settings', async () => {
             const user = userEvent.setup();
             (fetchAuthStatus as any).mockResolvedValueOnce({

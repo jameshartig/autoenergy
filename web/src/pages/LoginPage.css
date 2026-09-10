@@ -1,14 +1,3 @@
-.auth-page {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: calc(100vh - 64px);
-  background: var(--bg-app);
-  padding: 1.5rem;
-  position: relative;
-  overflow: hidden;
-}
-
 /* Base grid decoration consistent with landing page */
 .auth-page::before {
   content: '';
@@ -42,24 +31,24 @@
   width: 100% !important;
   max-width: 250px !important;
   height: 44px !important;
-  padding: 0 1rem !important;
-  font-family: inherit !important;
-  font-weight: 600 !important;
-  font-size: 14px !important;
-  border-radius: 99px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  cursor: pointer !important;
-  transition: all 0.2s ease !important;
-  border: 1px solid #333 !important;
-  background-color: #000 !important;
-  color: #fff !important;
+  padding: 0 1rem;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 99px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid #333;
+  background-color: #000;
+  color: #fff;
 }
 
 .apple-auth-btn:hover {
-  background-color: #1a1a1a !important;
-  border-color: #444 !important;
+  background-color: #1a1a1a;
+  border-color: #444;
 }
 
 .auth-disabled-message {
@@ -155,21 +144,6 @@
 
 .beta-interstitial-feedback.success p:first-child {
   color: var(--accent);
-}
-
-.beta-interstitial-feedback p {
-  margin: 0;
-}
-
-.beta-interstitial-feedback-link {
-  color: #b45309;
-  text-decoration: underline;
-  font-weight: 600;
-  transition: color 0.15s ease;
-}
-
-.beta-interstitial-feedback-link:hover {
-  color: #92400e;
 }
 
 .beta-interstitial-continue-btn {

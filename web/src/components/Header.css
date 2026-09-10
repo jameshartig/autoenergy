@@ -95,12 +95,6 @@
   white-space: nowrap;
 }
 
-.site-name-header {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  margin-left: 0.5rem;
-}
-
 .header-nav {
   flex: 2;
   /* Center navigation */
@@ -249,6 +243,10 @@
   display: contents;
 }
 
+.hide-on-desktop {
+  display: none;
+}
+
 /* ============================================
    Mobile
    ============================================ */
@@ -334,6 +332,9 @@
     width: 100%;
     text-align: center;
     display: block;
+    white-space: nowrap;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
   }
 
   .notification-bell-btn {
@@ -341,25 +342,12 @@
     width: 42px;
     height: 42px;
   }
-}
 
-.hide-on-desktop {
-  display: none;
-}
-
-/* Additional rules for mobile */
-@media (max-width: 768px) {
   .hide-on-mobile {
     display: none;
   }
 
   .hide-on-desktop {
     display: inline;
-  }
-
-  .login-link {
-    white-space: nowrap;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.85rem;
   }
 }

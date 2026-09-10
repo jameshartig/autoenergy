@@ -1,14 +1,6 @@
 .tutorial-dialog-popup {
   max-width: 450px;
-  background: var(--surface-container-low);
-  border: 1px solid var(--outline-variant);
-  border-radius: var(--radius-lg);
   padding: 2.25rem 2.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  box-shadow: var(--shadow-lg), 0 0 40px rgba(0, 0, 0, 0.5);
-  animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .tutorial-title {

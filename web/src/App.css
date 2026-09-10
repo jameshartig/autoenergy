@@ -3,6 +3,7 @@
    ============================================ */
 
 :root {
+  color-scheme: dark;
   --surface: #111318;
   /* Base Layer: Laboratory Floor */
   --surface-container-low: #1a1c20;
@@ -55,10 +56,7 @@
   --radius-xl: 16px;
 
   /* Spacing Tokens */
-  --spacing-4: 1rem;
-  --spacing-6: 1.3rem;
   --spacing-16: 3.5rem;
-  --spacing-20: 4.5rem;
 
   --spacing-xs: 0.5rem;
   --spacing-sm: 1rem;
@@ -177,8 +175,11 @@ textarea:focus-visible,
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: 70vh;
+  min-height: calc(100vh - 64px);
+  padding: 1.5rem;
   gap: 1.5rem;
+  position: relative;
+  overflow: hidden;
 }
 
 .auth-card {
@@ -464,46 +465,6 @@ button {
   margin-bottom: var(--spacing-sm);
 }
 
-.date-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  background: var(--surface-container-low);
-  padding: 0.5rem var(--spacing-sm);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-}
-
-.date-controls h2 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 700;
-  min-width: 200px;
-  text-align: center;
-  color: var(--on-surface);
-}
-
-.date-controls button {
-  background: transparent;
-  border: none;
-  color: var(--on-surface-variant);
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0.5rem 1rem;
-  border-radius: var(--radius-sm);
-  transition: all 0.2s ease;
-}
-
-.date-controls button:hover:not(:disabled) {
-  color: var(--primary);
-  background: var(--surface-container-high);
-}
-
-.date-controls button:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
 
 .savings-hero {
   margin-bottom: 2rem;
@@ -688,15 +649,9 @@ button {
 }
 
 
-/* Current Status Tweaks */
-.current-status-card {
-  margin-bottom: 0.5rem;
-  padding: var(--spacing-md) var(--spacing-lg);
-}
-
-
 /* Current Status Card */
 .current-status-card {
+  margin-bottom: 0.5rem;
   padding: var(--spacing-lg);
   border-radius: var(--radius-lg);
   display: flex;
@@ -896,14 +851,6 @@ button {
   justify-content: space-between;
 }
 
-.combobox-input-wrapper {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 0;
-  gap: 0;
-}
-
 .combobox-input {
   flex: 1;
   border: none;
@@ -1047,59 +994,6 @@ button {
   background: white;
 }
 
-/* Action List Items */
-.action-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-}
-
-.action-item {
-  background: var(--surface-container-low);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-  display: flex;
-  gap: var(--spacing-md);
-  transition: all 0.2s ease;
-}
-
-.action-item:hover {
-  background: var(--surface-container-high);
-  transform: translateY(-1px);
-}
-
-.action-time {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  font-weight: 600;
-  min-width: 80px;
-  padding-top: 0.15rem;
-}
-
-.action-details {
-  flex: 1;
-}
-
-.action-details h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--on-surface);
-}
-
-.action-details p {
-  margin: 0 0 0.75rem 0;
-  color: var(--on-surface-variant);
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
 .tags {
   display: flex;
   flex-wrap: wrap;
@@ -1167,48 +1061,6 @@ button {
   background: rgba(126, 34, 206, 0.1);
   color: #c084fc;
   border: 1px solid rgba(126, 34, 206, 0.2);
-}
-
-/* Faults (Legacy compatibility) */
-.action-item.fault-item {
-  border-left: 4px solid var(--danger);
-  background: rgba(255, 75, 75, 0.05);
-}
-
-.warning-banner {
-  background: rgba(255, 184, 0, 0.1);
-  border: 1px solid rgba(255, 184, 0, 0.2);
-  border-left: 4px solid var(--warning);
-  color: var(--warning);
-}
-
-/* Faults */
-/* Fault Alarms */
-.fault-alarms {
-  color: var(--danger);
-  font-weight: 600;
-}
-
-.fault-alarms {
-  color: var(--danger);
-  font-weight: 600;
-}
-
-/* Footer info in action item */
-.action-footer {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-}
-
-.price-label {
-  font-weight: 600;
-  color: var(--text-secondary);
 }
 
 .no-actions {
@@ -1422,17 +1274,6 @@ button {
   }
 }
 
-@media (max-width: 640px) {
-  .action-item {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .action-time {
-    font-size: 0.75rem;
-  }
-}
-
 /* Portal root for Base UI components */
 .app-container,
 .app-container-home {
@@ -1464,18 +1305,18 @@ button {
 }
 
 .join-error {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--danger);
+  background: rgba(255, 75, 75, 0.1);
   padding: 0.6rem 0.9rem;
   border-radius: var(--radius-sm);
   font-size: 0.85rem;
-  border: 1px solid #fecaca;
+  border: 1px solid rgba(255, 75, 75, 0.2);
 }
 
 .join-submit {
   padding: 0.65rem;
   background: var(--primary);
-  color: var(--text-on-primary);
+  color: var(--on-primary);
   border: none;
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
@@ -1490,7 +1331,7 @@ button {
 }
 
 .join-submit:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--primary-glow);
 }
 
 .join-submit:active:not(:disabled) {
@@ -1523,10 +1364,9 @@ button {
 .recharts-wrapper,
 .recharts-surface {
   touch-action: pan-y;
+  outline: none !important;
 }
 
-.recharts-wrapper,
-.recharts-surface,
 .recharts-wrapper *:focus,
 .recharts-surface *:focus {
   outline: none !important;

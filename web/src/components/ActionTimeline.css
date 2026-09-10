@@ -231,12 +231,6 @@
     font-variant-numeric: tabular-nums;
 }
 
-.timeline-tags {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-}
-
 /* Reuse existing tag styles from App.css but make them a bit subtler here */
 .timeline-content .tag {
     opacity: 0.9;

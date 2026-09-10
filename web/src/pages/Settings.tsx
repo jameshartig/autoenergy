@@ -1658,16 +1658,28 @@ const Settings = ({
           }, 0)
         : 0;
 
-    const isLocationConfigured = settings ? (!!settings.countryCode && !!settings.postalCode) : false;
-    const isUtilityConfigured = settings ? (!!settings.utilityProvider && settings.utilityProvider !== "") : false;
-    const isESSConfigured = settings ? (!!settings.ess && settings.ess !== "" && !!settings.hasCredentials?.[settings.ess]) : false;
+    const initialSettingsObj: SettingsType | null = (() => {
+        if (parentSettings) return parentSettings;
+        if (originalSettingsRef.current) {
+            try {
+                return JSON.parse(originalSettingsRef.current);
+            } catch {
+                return null;
+            }
+        }
+        return settings;
+    })();
+
+    const isLocationConfigured = !!(initialSettingsObj?.countryCode && initialSettingsObj?.postalCode) || !!(settings?.countryCode && settings?.postalCode);
+    const isUtilityConfigured = !!(initialSettingsObj?.utilityProvider && initialSettingsObj?.utilityProvider !== "") || !!(settings?.utilityProvider && settings?.utilityProvider !== "");
+    const isESSConfigured = !!(initialSettingsObj?.ess && initialSettingsObj.ess !== "" && initialSettingsObj.hasCredentials?.[initialSettingsObj.ess]) || !!(settings?.ess && settings.ess !== "" && settings?.hasCredentials?.[settings.ess]);
 
     const showWizard = !!(settings && isInWizard && !forceFullSettings);
     const showChecklist = !!(settings && !showWizard && (!isUtilityConfigured || !isESSConfigured) && !forceFullSettings);
 
     const locationHighlightClass = showChecklist && !isLocationConfigured ? "highlighted-section" : "";
-    const utilityHighlightClass = showChecklist && !isUtilityConfigured ? "highlighted-section" : "";
-    const essHighlightClass = showChecklist && !isESSConfigured ? "highlighted-section" : "";
+    const utilityHighlightClass = showChecklist && !isUtilityConfigured && !isUtilityDirty ? "highlighted-section" : "";
+    const essHighlightClass = showChecklist && !isESSConfigured && !isESSDirty ? "highlighted-section" : "";
 
     const renderTeslaGridModal = () => (
         <Dialog.Root open={showTeslaGridModal} onOpenChange={(open) => {

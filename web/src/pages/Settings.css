@@ -48,73 +48,6 @@
 
 
 
-/* Collapsible Section Header */
-.advanced-section-collapsible {
-  margin-top: 1.5rem;
-}
-
-.advanced-section-header {
-  border-bottom: 1px solid var(--outline-variant);
-  padding-bottom: 0.75rem;
-  margin-bottom: 1.5rem;
-  margin-top: 0;
-}
-
-.advanced-section-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font-family: inherit;
-  color: inherit;
-}
-
-.advanced-section-trigger h3 {
-  margin: 0;
-  border: none;
-  padding: 0;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 700;
-  transition: color 0.2s;
-}
-
-.advanced-section-trigger:hover h3 {
-  color: var(--primary);
-}
-
-.advanced-section-trigger .chevron-icon {
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  color: var(--text-muted);
-}
-
-.advanced-section-trigger:hover .chevron-icon {
-  color: var(--primary);
-}
-
-.advanced-section-trigger[data-open] .chevron-icon {
-  transform: rotate(180deg);
-  color: var(--primary);
-}
-
-.advanced-panel {
-  overflow: hidden;
-  transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.advanced-panel h3 {
-  margin-top: 1.5rem;
-  border-bottom: 1px solid var(--outline-variant);
-  padding-bottom: 0.5rem;
-  font-size: 0.8rem;
-}
-
 .submit-section {
   margin-top: 3rem;
   display: flex;
@@ -172,7 +105,7 @@
 }
 
 .save-button:hover {
-  background: var(--primary-hover);
+  background: var(--primary-glow);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
@@ -330,7 +263,7 @@
 }
 
 .text-button:hover {
-  background: rgba(14, 165, 233, 0.1);
+  background: rgba(75, 142, 255, 0.1);
   text-decoration: underline;
 }
 
@@ -341,17 +274,17 @@
 
 /* Edit Mode Styling */
 .edit-section {
-  background: var(--surface-container) !important;
+  background: var(--surface-container-high);
   padding: 2rem;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--primary) !important;
+  border: 1px solid var(--primary);
   margin-bottom: 2rem;
   box-shadow: 0 0 30px rgba(75, 142, 255, 0.1);
 }
 
 .weather-attribution {
   font-size: 0.9em;
-  color: var(--text-color);
+  color: var(--on-surface-variant);
   opacity: 0.8;
   margin-top: 8px;
   margin-bottom: 16px;
@@ -390,7 +323,7 @@
 
 .utility-rate-unsupported-link .inline-link:hover {
   color: var(--primary-glow);
-  background: rgba(14, 165, 233, 0.1);
+  background: rgba(75, 142, 255, 0.1);
 }
 
 /* ============================================
@@ -443,15 +376,15 @@
   font-weight: 700;
   font-size: 1rem;
   color: var(--text-muted);
-  background: var(--surface-container);
+  background: var(--surface-container-high);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .wizard-step-bubble.active {
   border-color: var(--primary);
   color: var(--primary);
-  box-shadow: 0 0 15px rgba(14, 165, 233, 0.3);
-  background: rgba(14, 165, 233, 0.05);
+  box-shadow: 0 0 15px rgba(75, 142, 255, 0.3);
+  background: rgba(75, 142, 255, 0.05);
 }
 
 .wizard-step-bubble.completed {
@@ -531,7 +464,7 @@
 
 /* Checklist Banner */
 .checklist-banner {
-  background: var(--surface-container);
+  background: var(--surface-container-high);
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius-lg);
   padding: 1rem 2rem 1.5rem;
@@ -624,22 +557,22 @@
 }
 
 .settings-section.highlighted-section {
-  background: rgba(14, 165, 233, 0.03);
-  border: 2px dashed var(--primary);
-  padding: 1.5rem;
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.05);
+  background: rgba(75, 142, 255, 0.03);
+  outline: 2px dashed var(--primary);
+  outline-offset: 6px;
+  box-shadow: 0 0 20px rgba(75, 142, 255, 0.05);
   animation: pulse-border 2s infinite alternate;
 }
 
 @keyframes pulse-border {
   0% {
-    border-color: rgba(14, 165, 233, 0.4);
-    box-shadow: 0 0 10px rgba(14, 165, 233, 0.05);
+    outline-color: rgba(75, 142, 255, 0.4);
+    box-shadow: 0 0 10px rgba(75, 142, 255, 0.05);
   }
 
   100% {
-    border-color: rgba(14, 165, 233, 0.8);
-    box-shadow: 0 0 20px rgba(14, 165, 233, 0.15);
+    outline-color: rgba(75, 142, 255, 0.8);
+    box-shadow: 0 0 20px rgba(75, 142, 255, 0.15);
   }
 }
 

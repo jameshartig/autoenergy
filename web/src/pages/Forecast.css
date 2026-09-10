@@ -23,18 +23,6 @@
   touch-action: pan-y;
 }
 
-.forecast-loading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 200px;
-  color: var(--text-muted);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-size: 0.8rem;
-}
-
 /* Error State */
 .forecast-page .error {
   background: rgba(239, 68, 68, 0.1);

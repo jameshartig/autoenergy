@@ -42,7 +42,7 @@
 }
 
 .admin-site-card:hover {
-  border-color: var(--border-focus);
+  border-color: var(--primary);
   box-shadow: var(--shadow-md);
 }
 
@@ -68,11 +68,11 @@
 
 .admin-primary-btn {
   background-color: var(--primary);
-  color: var(--text-on-primary);
+  color: var(--on-primary);
 }
 
 .admin-primary-btn:hover {
-  background-color: var(--primary-hover);
+  background-color: var(--primary-glow);
 }
 
 .admin-empty {
@@ -84,10 +84,10 @@
 
 .admin-error {
   color: var(--danger);
-  background-color: #fef2f2;
+  background-color: rgba(255, 75, 75, 0.1);
   padding: var(--spacing-md);
   border-radius: var(--radius-md);
-  border: 1px solid #fecaca;
+  border: 1px solid rgba(255, 75, 75, 0.2);
   margin-top: var(--spacing-md);
 }
 
@@ -102,7 +102,7 @@
   justify-content: space-between;
   width: 100%;
   font-size: 0.875rem;
-  color: var(--text-muted-color);
+  color: var(--text-muted);
 }
 
 .feedback-row {
@@ -111,7 +111,7 @@
   align-items: center;
 }
 
-.feedback-sentiment {
+.feedback-row .feedback-sentiment {
   font-size: 1.5rem;
 }
 
@@ -121,7 +121,7 @@
 
 .feedback-extra {
   font-size: 0.75rem;
-  color: var(--text-muted-color);
+  color: var(--text-muted);
   margin-top: 0.5rem;
   word-break: break-all;
 }
@@ -156,18 +156,18 @@
   font-size: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background-color: var(--bg-card);
+  background-color: var(--surface-container-low);
   color: var(--text-primary);
 }
 
 .admin-search-input:focus {
   outline: none;
-  border-color: var(--border-focus);
+  border-color: var(--primary);
 }
 
 .admin-search-btn {
   background-color: var(--primary);
-  color: var(--text-on-primary);
+  color: var(--on-primary);
   border: none;
   border-radius: var(--radius-md);
   padding: 0.5rem 1rem;
@@ -176,7 +176,7 @@
 }
 
 .admin-search-btn:hover:not(:disabled) {
-  background-color: var(--primary-hover);
+  background-color: var(--primary-glow);
 }
 
 .admin-search-btn:disabled {
@@ -249,13 +249,13 @@
   font-size: 0.875rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background-color: var(--bg-card);
+  background-color: var(--surface-container-low);
   color: var(--text-primary);
 }
 
 .admin-alias-input:focus {
   outline: none;
-  border-color: var(--border-focus);
+  border-color: var(--primary);
 }
 
 .admin-alias-save-btn {
