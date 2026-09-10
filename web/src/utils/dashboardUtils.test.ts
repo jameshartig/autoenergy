@@ -315,15 +315,15 @@ describe('dashboardUtils', () => {
 
     describe('formatHour12', () => {
         it('formats midnight and midday correctly', () => {
-            expect(formatHour12(0)).toBe('12:00 AM');
-            expect(formatHour12(12)).toBe('12:00 PM');
+            expect(formatHour12(0)).toBe('12 AM');
+            expect(formatHour12(12)).toBe('12 PM');
         });
 
-        it('formats morning and evening hours in 12-hour time without leading zeros', () => {
-            expect(formatHour12(7)).toBe('7:00 AM');
-            expect(formatHour12(13)).toBe('1:00 PM');
-            expect(formatHour12(20)).toBe('8:00 PM');
-            expect(formatHour12(23)).toBe('11:00 PM');
+        it('formats morning and evening hours in 12-hour time without leading zeros or :00 minutes', () => {
+            expect(formatHour12(7)).toBe('7 AM');
+            expect(formatHour12(13)).toBe('1 PM');
+            expect(formatHour12(20)).toBe('8 PM');
+            expect(formatHour12(23)).toBe('11 PM');
         });
     });
 });

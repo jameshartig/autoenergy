@@ -101,7 +101,7 @@ export const formatHour12 = (hour: number): string => {
     const h = ((hour % 24) + 24) % 24;
     const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
     const ampm = h >= 12 ? 'PM' : 'AM';
-    return `${displayHour}:00 ${ampm}`;
+    return `${displayHour} ${ampm}`;
 };
 
 // gridChargeCost returns the effective grid charging cost (base price + delivery adder).

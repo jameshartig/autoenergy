@@ -442,10 +442,10 @@ describe('NotificationModal', () => {
 
         await waitFor(() => {
             expect(screen.getByLabelText('Morning Summary Delivery Time')).toBeInTheDocument();
-            expect(screen.getByLabelText('Morning Summary Delivery Time')).toHaveTextContent('7:00 AM');
+            expect(screen.getByLabelText('Morning Summary Delivery Time')).toHaveTextContent('7 AM');
             expect(screen.getByLabelText('Morning Summary Flavor')).toBeInTheDocument();
             expect(screen.getByLabelText('Evening Summary Delivery Time')).toBeInTheDocument();
-            expect(screen.getByLabelText('Evening Summary Delivery Time')).toHaveTextContent('8:00 PM');
+            expect(screen.getByLabelText('Evening Summary Delivery Time')).toHaveTextContent('8 PM');
             expect(screen.getByLabelText('Evening Summary Flavor')).toBeInTheDocument();
             expect(screen.getAllByText('Preview on Device').length).toBe(2);
         });
